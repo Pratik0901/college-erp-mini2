@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Login - College ERP</title>
+    <link rel="stylesheet" href="../common/styles.css">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --admin-color: #ff6b6b;
+            --staff-color: #4ecdc4;
+            --student-color: #45b7d1;
+            --bg-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
+            --text-dark: #2c3e50;
+            --text-light: #7f8c8d;
+            --white: #ffffff;
+            --shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+            --card-bg: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%);
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: var(--bg-gradient);
+            background-attachment: fixed;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow-x: hidden;
+            position: relative;
+            font-size: 16px;
+            line-height: 1.55;
+        }
+
+        /* Animated Background */
+        .animated-bg {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: -1;
+            overflow: hidden;
+        }
+
+        .animated-bg::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: 
+                radial-gradient(circle at 20% 80%, rgba(120, 119, 198, 0.3) 0%, transparent 50%),
+                radial-gradient(circle at 80% 20%, rgba(255, 119, 198, 0.3) 0%, transparent 50%);
+            animation: gradientShift 8s ease-in-out infinite;
+        }
+
+        .floating-shapes {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+
+        .shape {
+            position: absolute;
+            border-radius: 50%;
+            opacity: 0.2;
+            animation: float 6s ease-in-out infinite;
+            box-shadow: 0 0 20px rgba(255, 255, 255, 0.3);
+        }
+
+        .shape-1 {
+            width: 80px;
+            height: 80px;
+            background: linear-gradient(135deg, #ff6b6b, #feca57, #48dbfb);
+            top: 20%;
+            left: 10%;
+            animation-delay: 0s;
+            animation-duration: 8s;
+        }
+
+        .shape-2 {
+            width: 60px;
+            height: 60px;
+            background: linear-gradient(135deg, #ff9ff3, #54a0ff, #5f27cd);
+            top: 60%;
+            right: 15%;
+            animation-delay: 2s;
+            animation-duration: 10s;
+            border-radius: 30% 70% 70% 30% / 30% 30% 70% 70%;
+        }
+
+        .shape-3 {
+            width: 100px;
+            height: 100px;
+            background: linear-gradient(135deg, #00d2d3, #54a0ff, #5f27cd);
+            bottom: 20%;
+            left: 20%;
+            animation-delay: 4s;
+            animation-duration: 12s;
+            border-radius: 60% 40% 30% 70% / 60% 30% 70% 40%;
+        }
+
+        .shape-4 {
+            width: 40px;
+            height: 40px;
+            background: linear-gradient(135deg, #feca57, #ff6348, #ff9ff3);
+            top: 40%;
+            right: 30%;
+            animation-delay: 1s;
+            animation-duration: 7s;
+            border-radius: 70% 30% 50% 50% / 30% 50% 50% 70%;
+        }
+
+        .shape-5 {
+            width: 70px;
+            height: 70px;
+            background: linear-gradient(135deg, #1dd1a1, #10ac84, #00d2d3);
+            top: 10%;
+            right: 40%;
+            animation-delay: 3s;
+            animation-duration: 9s;
+            border-radius: 40% 60% 60% 40% / 60% 40% 40% 60%;
+        }
+
+        .shape-6 {
+            width: 50px;
+            height: 50px;
+            background: linear-gradient(135deg, #ff6348, #ff4757, #feca57);
+            bottom: 40%;
+            right: 10%;
+            animation-delay: 5s;
+            animation-duration: 11s;
+            border-radius: 80% 20% 55% 45% / 25% 75% 25% 75%;
+        }
+
+        /* Add more colorful shapes */
+        .shape-7 {
+            width: 90px;
+            height: 90px;
+            background: linear-gradient(135deg, #a55eea, #26de81, #feca57);
+            top: 5%;
+            left: 50%;
+            animation-delay: 6s;
+            animation-duration: 14s;
+            border-radius: 50% 50% 20% 80% / 25% 25% 75% 75%;
+        }
+
+        .shape-8 {
+            width: 35px;
+            height: 35px;
+            background: linear-gradient(135deg, #fd79a8, #fdcb6e, #e17055);
+            top: 70%;
+            left: 60%;
+            animation-delay: 7s;
+            animation-duration: 6s;
+            border-radius: 20% 80% 80% 20% / 80% 20% 20% 80%;
+        }
+
+        /* Login Pages Styles */
+        .login-body {
+            background: var(--bg-gradient);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .login-body::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(circle, rgba(255, 255, 255, 0.1) 0%, transparent 70%);
+            animation: rotate 20s linear infinite;
+        }
+
+        .login-container {
+            position: relative;
+            z-index: 1;
+            width: 100%;
+            max-width: 400px;
+            padding: 20px;
+        }
+
+        .back-button {
+            display: inline-block;
+            color: var(--white);
+            text-decoration: none;
+            margin-bottom: 20px;
+            font-size: 1rem;
+            transition: all 0.3s ease;
+            animation: slideInLeft 0.5s ease-out;
+        }
+
+        .back-button:hover {
+            transform: translateX(-5px);
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+            color: var(--white);
+            text-decoration: none;
+        }
+
+        .login-form-wrapper {
+            background: var(--white);
+            border-radius: 20px;
+            padding: 40px;
+            box-shadow: var(--shadow);
+            animation: zoomIn 0.6s ease-out;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .login-form-wrapper::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: linear-gradient(90deg, var(--admin-color), #ff8a80);
+        }
+
+        .staff-theme::before {
+            background: linear-gradient(90deg, var(--staff-color), #26a69a);
+        }
+
+        .student-theme::before {
+            background: linear-gradient(90deg, var(--student-color), #29b6f6);
+        }
+
+        .login-header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .login-icon {
+            font-size: 3rem;
+            margin-bottom: 15px;
+            animation: pulse 2s infinite;
+        }
+
+        .login-header h2 {
+            color: var(--text-dark);
+            margin-bottom: 5px;
+            font-size: 1.8rem;
+            font-weight: 800;
+        }
+
+        .login-header p {
+            color: var(--text-light);
+            font-size: 0.9rem;
+        }
+
+        .login-form {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .input-group {
+            position: relative;
+            margin-bottom: 25px;
+        }
+
+        .input-group input {
+            width: 100%;
+            padding: 15px 0;
+            font-size: 1rem;
+            border: none;
+            border-bottom: 2px solid #ddd;
+            background: transparent;
+            outline: none;
+            transition: all 0.3s ease;
+        }
+
+        .input-group label {
+            position: absolute;
+            top: 15px;
+            left: 0;
+            font-size: 1rem;
+            color: var(--text-light);
+            pointer-events: none;
+            transition: all 0.3s ease;
+            font-weight: 600;
+        }
+
+        .input-group input:focus ~ label,
+        .input-group input:valid ~ label {
+            top: -5px;
+            font-size: 0.8rem;
+            color: var(--admin-color);
+        }
+
+        .staff-theme .input-group input:focus ~ label,
+        .staff-theme .input-group input:valid ~ label {
+            color: var(--staff-color);
+        }
+
+        .student-theme .input-group input:focus ~ label,
+        .student-theme .input-group input:valid ~ label {
+            color: var(--student-color);
+        }
+
+        .input-border {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 0;
+            height: 2px;
+            background: linear-gradient(90deg, var(--admin-color), #ff8a80);
+            transition: width 0.3s ease;
+        }
+
+        .staff-theme .input-border {
+            background: linear-gradient(90deg, var(--staff-color), #26a69a);
+        }
+
+        .student-theme .input-border {
+            background: linear-gradient(90deg, var(--student-color), #29b6f6);
+        }
+
+        .input-group input:focus ~ .input-border {
+            width: 100%;
+        }
+
+        .login-btn {
+            padding: 15px;
+            font-size: 1rem;
+            font-weight: 700;
+            border: none;
+            border-radius: 50px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+            margin-bottom: 20px;
+        }
+
+        .admin-btn {
+            background: linear-gradient(135deg, var(--admin-color), #ff8a80);
+            color: var(--white);
+        }
+
+        .staff-btn {
+            background: linear-gradient(135deg, var(--staff-color), #26a69a);
+            color: var(--white);
+        }
+
+        .student-btn {
+            background: linear-gradient(135deg, var(--student-color), #29b6f6);
+            color: var(--white);
+        }
+
+        .login-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
+        }
+
+        .login-btn:active {
+            transform: translateY(0);
+        }
+
+        .form-footer {
+            text-align: center;
+        }
+
+        .forgot-link {
+            color: var(--text-light);
+            text-decoration: none;
+            font-size: 0.9rem;
+            transition: color 0.3s ease;
+        }
+
+        .forgot-link:hover {
+            color: var(--admin-color);
+            text-decoration: underline;
+        }
+
+        /* Animations */
+        @keyframes float {
+            0%, 100% { transform: translateY(0px); }
+            50% { transform: translateY(-20px); }
+        }
+
+        @keyframes gradientShift {
+            0%, 100% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+        }
+
+        @keyframes rotate {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        @keyframes slideInLeft {
+            from { opacity: 0; transform: translateX(-30px); }
+            to { opacity: 1; transform: translateX(0); }
+        }
+
+        @keyframes zoomIn {
+            from { opacity: 0; transform: scale(0.9); }
+            to { opacity: 1; transform: scale(1); }
+        }
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+        }
+
+        /* Responsive Design */
+        @media (max-width: 480px) {
+            .login-container {
+                padding: 10px;
+            }
+            
+            .login-form-wrapper {
+                padding: 30px 20px;
+            }
+            
+            .login-header h2 {
+                font-size: 1.5rem;
+            }
+            
+            .login-icon {
+                font-size: 2.5rem;
+            }
+        }
+    </style>
+</head>
+<body class="login-body">
+    <div class="animated-bg">
+        <div class="floating-shapes">
+            <div class="shape shape-1"></div>
+            <div class="shape shape-2"></div>
+            <div class="shape shape-3"></div>
+            <div class="shape shape-4"></div>
+            <div class="shape shape-5"></div>
+            <div class="shape shape-6"></div>
+            <div class="shape shape-7"></div>
+            <div class="shape shape-8"></div>
+        </div>
+    </div>
+    
+    <div class="login-container">
+        <a href="../index.html" class="back-button">← Back to Home</a>
+        
+        <div class="login-form-wrapper admin-theme">
+            <div class="login-header">
+                <div class="login-icon">👨‍💼</div>
+                <h2>Admin Login</h2>
+                <p>Administrative Portal Access</p>
+            </div>
+            
+            <form id="loginForm">
+                <div class="input-group">
+                    <input type="text" id="username" name="admin_id" required>
+                    <label for="username">Admin ID</label>
+                    <span class="input-border"></span>
+                </div>
+                
+                <div class="input-group">
+                    <input type="password" id="password" name="password" required>
+                    <label for="password">Password</label>
+                    <span class="input-border"></span>
+                </div>
+                
+                <button type="submit" class="login-btn admin-btn">
+                    Login
+                </button>
+                
+                <div class="form-footer">
+                    <a href="forgot-password.html" class="forgot-link">Forgot Password?</a>
+                </div>
+                
+                <div id="error" style="color: red; display: none;"></div>
+            </form>
+        </div>
+    </div>
+
+    <p id="login-status" class="links" aria-live="polite"></p>
+
+    <script>
+        document.getElementById('loginForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            const errorDiv = document.getElementById('error');
+
+            try {
+                const response = await fetch('/api/admin/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password })
+                });
+                const data = await response.json();
+
+                if (data.success) {
+                    localStorage.setItem('adminToken', data.token);
+                    // fetch admin user id
+                    try {
+                        const r = await fetch('/api/admin/users?role=admin');
+                        const admins = await r.json();
+                        if (Array.isArray(admins) && admins.length) {
+                            localStorage.setItem('adminUserId', admins[0].id);
+                        }
+                    } catch {}
+                    window.location.href = 'admin-dashboard.html';
+                } else {
+                    errorDiv.textContent = 'Invalid credentials';
+                    errorDiv.style.display = 'block';
+                }
+            } catch (err) {
+                errorDiv.textContent = 'Login failed. Try again.';
+                errorDiv.style.display = 'block';
+            }
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,205 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Faculty Dashboard</title>
+  <link rel="stylesheet" href="../common/styles.css">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>
+    body{font-size:16px;line-height:1.55;-webkit-font-smoothing:antialiased;font-weight:500;}
+    h1,h2,h3{font-weight:700;letter-spacing:.4px;}
+    .muted,.small-muted{color:#eef1f5!important;}
+    .card h3{font-weight:700;font-size:18px;}
+    .kpi h2{font-size:30px;font-weight:700;}
+    .btn{font-weight:600;}
+  </style>
+</head>
+<body>
+  <header>
+    <div class="profile">
+      <img src="https://img.icons8.com/emoji/48/000000/teacher-emoji.png"/>
+      <div>
+        <div style="font-weight:600" id="staffName">--</div>
+        <div class="small-muted" id="staffDept">Faculty Portal</div>
+      </div>
+    </div>
+    <div>
+      <a class="btn secondary" href="#" onclick="logout()">Logout</a>
+    </div>
+  </header>
+
+  <div class="container">
+    <h1 style="color:#fff" id="welcomeMessage">Welcome Back! 👋</h1>
+    <p style="color:#fff;opacity:0.9">Manage your courses and students</p>
+
+    <div class="kpis">
+      <div class="kpi">
+        <h2 id="totalCourses">--</h2>
+        <p>Total Courses</p>
+      </div>
+      <div class="kpi">
+        <h2 id="totalStudents">--</h2>
+        <p>Total Students</p>
+      </div>
+      <div class="kpi">
+        <h2 id="staffId">--</h2>
+        <p>Staff ID</p>
+      </div>
+      <div class="kpi">
+        <h2 id="email">--</h2>
+        <p>Email</p>
+      </div>
+    </div>
+
+    <div class="card-grid">
+      <div class="card">
+        <h3>📝 Mark Attendance</h3>
+        <p class="muted">Mark student attendance for your classes</p>
+        <a class="btn" href="mark-attendance.html" style="margin-top:16px">Mark Attendance</a>
+      </div>
+
+      <div class="card">
+        <h3>📊 Enter Grades</h3>
+        <p class="muted">Enter and update student grades</p>
+        <a class="btn" href="enter-grades.html" style="margin-top:16px">Enter Grades</a>
+      </div>
+
+      <div class="card">
+        <h3>📚 Upload Materials</h3>
+        <p class="muted">Share study materials with students</p>
+        <a class="btn" href="upload-materials.html" style="margin-top:16px">Upload Materials</a>
+      </div>
+
+      <div class="card">
+        <h3>🔔 Send Notifications</h3>
+        <p class="muted">Notify students about important updates</p>
+        <a class="btn" href="notifications.html" style="margin-top:16px">Send Notification</a>
+      </div>
+
+      <div class="card">
+        <h3>📥 View Notifications</h3>
+        <p class="muted">See announcements & sender info</p>
+        <a class="btn" href="view-notifications.html" style="margin-top:16px">View Notifications</a>
+      </div>
+    </div>
+
+    <div class="card-grid" style="margin-top:30px">
+      <div class="card">
+        <h3>📚 My Courses</h3>
+        <p class="muted">Your assigned courses</p>
+        <div id="coursesList" style="margin-top:15px">
+          <p class="small-muted">Loading courses...</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    function logout() {
+      localStorage.removeItem('staffToken');
+      localStorage.removeItem('staffData');
+      window.location.href = '../index.html';
+    }
+
+    async function fetchStaffProfile(token) {
+      try {
+        const res = await fetch('/api/staff/profile', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token })
+        });
+        if (!res.ok) return null;
+        const j = await res.json();
+        return j.success ? j.staff : null;
+      } catch { return null; }
+    }
+
+    async function fetchStaffSummary(userId) {
+      try {
+        const res = await fetch(`/api/staff/${userId}/summary`);
+        if (!res.ok) return null;
+        return await res.json();
+      } catch { return null; }
+    }
+
+    async function fetchCourses() {
+      try {
+        const res = await fetch('/api/staff/courses');
+        if (!res.ok) return [];
+        return await res.json();
+      } catch { return []; }
+    }
+
+    function renderHeader(staff) {
+      const welcomeMessage = document.getElementById('welcomeMessage');
+      if (welcomeMessage && staff.username) {
+        welcomeMessage.textContent = `Welcome, ${staff.username}! 👋`;
+      }
+      document.getElementById('staffName').textContent = staff.name || 'Staff Member';
+      document.getElementById('staffDept').textContent = staff.department || 'Department';
+      document.getElementById('staffId').textContent = staff.staff_id || '--';
+      document.getElementById('email').textContent = staff.email || '--';
+    }
+
+    function renderSummary(sum) {
+      if (!sum) return;
+      document.getElementById('totalCourses').textContent = sum.total_courses ?? 0;
+      document.getElementById('totalStudents').textContent = sum.total_students ?? 0;
+    }
+
+    function renderCourses(courses) {
+      const list = document.getElementById('coursesList');
+      if (!list) return;
+      if (!courses || courses.length === 0) {
+        list.innerHTML = '<p class="small-muted">No courses assigned</p>';
+        return;
+      }
+      list.innerHTML = courses.map(c =>
+        `<div style="padding: 10px; background: #f5f5f5; margin: 8px 0; border-radius: 8px; border-left: 4px solid #4ecdc4;">
+          <strong>${c.code} - ${c.title}</strong>
+        </div>`
+      ).join('');
+    }
+
+    async function loadStaffData() {
+      const token = localStorage.getItem('staffToken');
+      const cached = localStorage.getItem('staffData');
+      if (!token || !cached) {
+        window.location.href = 'staff-login.html';
+        return;
+      }
+
+      // Fast render from cache
+      try {
+        const staff = JSON.parse(cached);
+        renderHeader(staff);
+      } catch {
+        window.location.href = 'staff-login.html';
+        return;
+      }
+
+      // Refresh from API
+      const liveStaff = await fetchStaffProfile(token);
+      if (liveStaff) {
+        localStorage.setItem('staffData', JSON.stringify(liveStaff));
+        renderHeader(liveStaff);
+
+        const sum = await fetchStaffSummary(liveStaff.id);
+        renderSummary(sum);
+
+        const allCourses = await fetchCourses();
+        renderCourses(allCourses);
+      } else {
+        // Still try to fill KPIs and courses with generic data
+        const staff = JSON.parse(localStorage.getItem('staffData') || '{}');
+        const sum = await fetchStaffSummary(staff.id);
+        renderSummary(sum);
+        const allCourses = await fetchCourses();
+        renderCourses(allCourses);
+      }
+    }
+
+    window.addEventListener('load', loadStaffData);
+  </script>
+</body>
+</html>

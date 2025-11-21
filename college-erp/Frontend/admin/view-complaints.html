@@ -1,0 +1,108 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>View Complaints</title>
+  <link rel="stylesheet" href="../common/styles.css">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+</head>
+<body>
+  <header>
+    <div class="profile">
+      <img src="https://img.icons8.com/emoji/48/000000/man-office-worker.png"/>
+      <div>
+        <div style="font-weight:600">Admin User</div>
+        <div class="small-muted">Administrator</div>
+      </div>
+    </div>
+    <div>
+      <a class="btn secondary" href="admin-dashboard.html">← Back</a>
+    </div>
+  </header>
+
+  <div class="container">
+    <h1 style="color:#fff">Student Complaints</h1>
+    
+    <div class="card" style="margin-top:24px">
+      <h3>Complaint List</h3>
+      
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Student</th>
+            <th>Subject</th>
+            <th>Description</th>
+            <th>Status</th>
+            <th>Date</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody id="complaintsList">
+          <tr><td colspan="7">Loading...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    async function loadComplaints() {
+      const res = await fetch('/api/admin/complaints');
+      const complaints = await res.json();
+      
+      const tbody = document.getElementById('complaintsList');
+      if (complaints.length > 0) {
+        tbody.innerHTML = complaints.map(c => `
+          <tr>
+            <td>${c.id}</td>
+            <td>${c.full_name}</td>
+            <td><strong>${c.subject}</strong></td>
+            <td style="max-width:200px">${c.description.substring(0, 50)}...</td>
+            <td><span class="pill" style="background:${getStatusColor(c.status)};color:#fff">${c.status}</span></td>
+            <td>${new Date(c.created_at).toLocaleDateString()}</td>
+            <td>
+              <select onchange="updateStatus(${c.id}, this.value)">
+                <option value="">Update Status</option>
+                <option value="in_progress">In Progress</option>
+                <option value="resolved">Resolved</option>
+              </select>
+            </td>
+          </tr>
+        `).join('');
+      } else {
+        tbody.innerHTML = '<tr><td colspan="7">No complaints found</td></tr>';
+      }
+    }
+    
+    function getStatusColor(status) {
+      switch(status) {
+        case 'open': return '#ff4757';
+        case 'in_progress': return '#ffa502';
+        case 'resolved': return '#2ecc71';
+        default: return '#7d8b95';
+      }
+    }
+    
+    async function updateStatus(id, status) {
+      if (!status) return;
+      
+      try {
+        const res = await fetch(`/api/admin/complaint/${id}/status`, {
+          method: 'PUT',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ status })
+        });
+        
+        if (res.ok) {
+          alert('Status updated successfully!');
+          loadComplaints();
+        }
+      } catch (err) {
+        alert('Error updating status');
+      }
+    }
+    
+    loadComplaints();
+  </script>
+</body>
+</html>

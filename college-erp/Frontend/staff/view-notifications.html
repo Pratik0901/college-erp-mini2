@@ -1,0 +1,89 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Notifications</title>
+  <link rel="stylesheet" href="../common/styles.css">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>
+    #notifList{max-height:320px;overflow-y:auto}
+    .notif-row{position:relative;padding:12px;border-bottom:1px solid #eee}
+    .notif-del{position:absolute;top:6px;right:6px;background:none;border:none;cursor:pointer;font-size:14px;color:#d9534f}
+    .notif-del:hover{color:#b52b27}
+    body{font-size:16px;line-height:1.55;font-weight:500;}
+    h1{font-weight:700;}
+    .notif-row strong{font-weight:700;}
+    .small-muted{color:#dfe3e8!important;}
+  </style>
+</head>
+<body>
+  <header>
+    <div class="profile">
+      <img src="https://img.icons8.com/emoji/48/000000/teacher-emoji.png"/>
+      <div>
+        <div style="font-weight:600" id="staffName">--</div>
+        <div class="small-muted" id="staffDept">Faculty Portal</div>
+      </div>
+    </div>
+    <div><a class="btn secondary" href="staff-dashboard.html">← Back</a></div>
+  </header>
+  <div class="container">
+    <h1 style="color:#fff">Notifications</h1>
+    <div class="card" style="margin-top:24px">
+      <div id="notifList"><p class="muted">Loading...</p></div>
+    </div>
+  </div>
+  <script>
+    function ensureStaff(){
+      const t=localStorage.getItem('staffToken'); const sStr=localStorage.getItem('staffData');
+      if(!t||!sStr){location.href='staff-login.html';return null;}
+      try{const s=JSON.parse(sStr);document.getElementById('staffName').textContent=s.name||s.username||'Staff';
+        document.getElementById('staffDept').textContent=s.department||'Faculty Portal';return s;}
+      catch{location.href='staff-login.html';return null;}
+    }
+    async function loadNotifications(){
+      try{
+        const staff = JSON.parse(localStorage.getItem('staffData')||'{}');
+        if(!staff.id){ document.getElementById('notifList').innerHTML='<p class="muted">No user</p>'; return;}
+        const res=await fetch(`/api/user/${staff.id}/notifications`);
+        const rows=await res.json();
+        if(!Array.isArray(rows)){ document.getElementById('notifList').innerHTML='<p class="muted">Error loading</p>'; return;}
+        const html=rows.map(n=>`
+          <div class="notif-row" id="notif_${n.id}">
+            <button class="notif-del" title="Delete" onclick="deleteNotification(${n.id})">🗑️</button>
+            <strong>${n.title}</strong>
+            <div class="small-muted" style="margin:4px 0;">${n.body}</div>
+            <div class="small-muted">
+              Target: ${n.target_role} | From: ${n.sender_full_name||n.sender_username||'System'} | ${new Date(n.created_at).toLocaleString()}
+            </div>
+          </div>`).join('');
+        document.getElementById('notifList').innerHTML= html || '<p class="muted">No notifications</p>';
+      }catch(e){ document.getElementById('notifList').innerHTML='<p class="muted">Error loading</p>'; }
+    }
+
+    async function deleteNotification(id){
+      const staff = JSON.parse(localStorage.getItem('staffData')||'{}');
+      if(!staff.id) return;
+      if(!confirm('Delete this notification?')) return;
+      try{
+        const res = await fetch(`/api/notification/${id}`, {
+          method:'DELETE',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({user_id: staff.id})
+        });
+        if(res.ok){
+          const el=document.getElementById('notif_'+id);
+          if(el) el.remove();
+          if(!document.querySelector('#notifList .notif-row')){
+            document.getElementById('notifList').innerHTML='<p class="muted">No notifications</p>';
+          }
+        }else{
+          alert('Delete failed');
+        }
+      }catch{alert('Delete error');}
+    }
+
+    window.addEventListener('load',()=>{ if(ensureStaff()) loadNotifications(); });
+  </script>
+</body>
+</html>

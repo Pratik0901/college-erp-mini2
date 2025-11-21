@@ -1,0 +1,331 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Manage Users</title>
+  <link rel="stylesheet" href="../common/styles.css">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>
+    body{font-size:16px;line-height:1.55;font-weight:500;}
+    h1,h3,th,label{font-weight:700;}
+    table td{font-size:15px;}
+    .btn{font-weight:600;}
+  </style>
+</head>
+<body>
+  <header>
+    <div class="profile">
+      <img src="https://img.icons8.com/emoji/48/000000/man-office-worker.png"/>
+      <div>
+        <div style="font-weight:600">Admin User</div>
+        <div class="small-muted">Administrator</div>
+      </div>
+    </div>
+    <div>
+      <a class="btn secondary" href="admin-dashboard.html">← Back</a>
+    </div>
+  </header>
+
+  <div class="container">
+    <h1 style="color:#fff">Manage Users</h1>
+    
+    <div class="card" style="margin-top:24px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+        <h3>Students</h3>
+        <button class="btn" onclick="showAddUserModal('student')">+ Add Student</button>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th><th>Username</th><th>Name</th><th>Email</th><th>Roll</th><th>Course</th><th>Sem</th><th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="studentsTable"><tr><td colspan="8">Loading...</td></tr></tbody>
+      </table>
+    </div>
+
+    <div class="card" style="margin-top:24px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+        <h3>Staff</h3>
+        <button class="btn" onclick="showAddUserModal('staff')">+ Add Staff</button>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th><th>Username</th><th>Name</th><th>Email</th><th>Dept</th><th>Designation</th><th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="staffTable"><tr><td colspan="7">Loading...</td></tr></tbody>
+      </table>
+    </div>
+
+    <div class="card" style="margin-top:24px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+        <h3>Admins</h3>
+        <button class="btn" onclick="showAddUserModal('admin')">+ Add Admin</button>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th><th>Username</th><th>Name</th><th>Email</th><th>Created</th><th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="adminsTable"><tr><td colspan="6">Loading...</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Add/Edit User Modal -->
+  <div id="addUserModal" class="modal">
+    <div class="modal-content">
+      <h3 id="modalTitle">Add User</h3>
+      <form id="addUserForm">
+        <input type="hidden" id="editUserId">
+        <div class="form-group">
+          <label>Role</label>
+          <select id="userRole" required onchange="toggleRoleFields()">
+            <option value="student">Student</option>
+            <option value="staff">Staff</option>
+            <option value="admin">Admin</option>
+          </select>
+        </div>
+        <div class="form-group"><label>Username</label><input type="text" id="username" required></div>
+        <div class="form-group"><label>Password (leave blank to keep)</label><input type="password" id="password"></div>
+        <div class="form-group"><label>Full Name</label><input type="text" id="fullName" required></div>
+        <div class="form-group"><label>Email</label><input type="email" id="email" required></div>
+
+        <!-- Student specific fields -->
+        <div id="studentFields" style="display:none">
+          <div class="form-group">
+            <label>Roll Number</label>
+            <input type="text" id="rollNo"><!-- removed required -->
+          </div>
+          <div class="form-group">
+            <label>Course</label>
+            <input type="text" id="course"><!-- removed required -->
+          </div>
+          <div class="form-group">
+            <label>Semester</label>
+            <input type="number" id="semester" min="1" max="12"><!-- removed required -->
+          </div>
+        </div>
+
+        <!-- Staff specific fields -->
+        <div id="staffFields" style="display:none">
+          <div class="form-group">
+            <label>Department</label>
+            <input type="text" id="dept"><!-- removed required -->
+          </div>
+          <div class="form-group">
+            <label>Designation</label>
+            <input type="text" id="designation"><!-- removed required -->
+          </div>
+        </div>
+
+        <div style="display:flex;gap:12px;margin-top:20px">
+          <button type="submit" class="btn" id="submitBtn">Save</button>
+          <button type="button" class="btn secondary" onclick="closeModal()">Cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    async function loadStudents() {
+      const res = await fetch('/api/admin/students');
+      const rows = await res.json();
+      const tbody = document.getElementById('studentsTable');
+      tbody.innerHTML = rows.length ? rows.map(r => `
+        <tr>
+          <td>${r.user_id}</td>
+          <td>${r.username}</td>
+          <td>${r.full_name}</td>
+          <td>${r.email}</td>
+          <td>${r.roll_no}</td>
+          <td>${r.course}</td>
+            <td>${r.semester}</td>
+          <td>
+            <button class="btn small" onclick="editUser(${r.user_id}, 'student')">Edit</button>
+            <button class="btn secondary small" onclick="deleteUser(${r.user_id})">Delete</button>
+          </td>
+        </tr>`).join('') : '<tr><td colspan="8">No students</td></tr>';
+    }
+
+    async function loadStaff() {
+      const res = await fetch('/api/admin/staff');
+      const rows = await res.json();
+      const tbody = document.getElementById('staffTable');
+      tbody.innerHTML = rows.length ? rows.map(r => `
+        <tr>
+          <td>${r.user_id}</td>
+          <td>${r.username}</td>
+          <td>${r.full_name}</td>
+          <td>${r.email}</td>
+          <td>${r.dept}</td>
+          <td>${r.designation}</td>
+          <td>
+            <button class="btn small" onclick="editUser(${r.user_id}, 'staff')">Edit</button>
+            <button class="btn secondary small" onclick="deleteUser(${r.user_id})">Delete</button>
+          </td>
+        </tr>`).join('') : '<tr><td colspan="7">No staff</td></tr>';
+    }
+
+    async function loadAdmins() {
+      const res = await fetch('/api/admin/users?role=admin');
+      const rows = await res.json();
+      const tbody = document.getElementById('adminsTable');
+      tbody.innerHTML = rows.length ? rows.map(r => `
+        <tr>
+          <td>${r.id}</td>
+          <td>${r.username}</td>
+          <td>${r.full_name}</td>
+          <td>${r.email}</td>
+          <td>${new Date(r.created_at).toLocaleDateString()}</td>
+          <td>
+            <button class="btn small" onclick="editUser(${r.id}, 'admin')">Edit</button>
+            <button class="btn secondary small" onclick="deleteUser(${r.id})">Delete</button>
+          </td>
+        </tr>`).join('') : '<tr><td colspan="6">No admins</td></tr>';
+    }
+
+    function showAddUserModal(role) {
+      document.getElementById('editUserId').value = '';
+      document.getElementById('userRole').value = role;
+      document.getElementById('modalTitle').textContent = 'Add ' + role.charAt(0).toUpperCase()+role.slice(1);
+      document.getElementById('password').required = true;
+      // clear role fields
+      ['rollNo','course','semester','dept','designation'].forEach(id => { const el = document.getElementById(id); if (el) el.value=''; });
+      toggleRoleFields();
+      document.getElementById('addUserModal').classList.add('active');
+    }
+
+    function editUser(id, role) {
+      document.getElementById('editUserId').value = id;
+      document.getElementById('userRole').value = role;
+      document.getElementById('modalTitle').textContent = 'Edit ' + role;
+      document.getElementById('password').value = '';
+      document.getElementById('password').required = false;
+      // Minimal fetch user (reuse list rows; for simplicity ask admin/users?role filter)
+      // In real app create a /api/admin/user/<id> GET.
+      toggleRoleFields();
+      document.getElementById('addUserModal').classList.add('active');
+    }
+
+    function closeModal() {
+      document.getElementById('addUserModal').classList.remove('active');
+      document.getElementById('addUserForm').reset();
+    }
+
+    function toggleRoleFields() {
+      const role = document.getElementById('userRole').value;
+      const stu = document.getElementById('studentFields');
+      const stf = document.getElementById('staffFields');
+
+      // student fields
+      const rollNo = document.getElementById('rollNo');
+      const course = document.getElementById('course');
+      const semester = document.getElementById('semester');
+
+      // staff fields
+      const dept = document.getElementById('dept');
+      const designation = document.getElementById('designation');
+
+      if (role === 'student') {
+        stu.style.display = 'block';
+        stf.style.display = 'none';
+
+        // enable + require student fields
+        [rollNo, course, semester].forEach(el => { el.disabled = false; el.required = true; });
+        // disable + unrequire staff fields
+        [dept, designation].forEach(el => { el.disabled = true; el.required = false; });
+      } else if (role === 'staff') {
+        stu.style.display = 'none';
+        stf.style.display = 'block';
+
+        [rollNo, course, semester].forEach(el => { el.disabled = true; el.required = false; });
+        [dept, designation].forEach(el => { el.disabled = false; el.required = true; });
+      } else {
+        // admin: hide both and unrequire all
+        stu.style.display = 'none';
+        stf.style.display = 'none';
+        [rollNo, course, semester, dept, designation].forEach(el => { el.disabled = true; el.required = false; });
+      }
+    }
+
+    document.getElementById('addUserForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const id = document.getElementById('editUserId').value;
+      const role = document.getElementById('userRole').value;
+
+      // ensure hidden fields are disabled so browser validation won't block
+      toggleRoleFields();
+
+      const payload = {
+        username: document.getElementById('username').value,
+        password: document.getElementById('password').value,
+        role,
+        full_name: document.getElementById('fullName').value,
+        email: document.getElementById('email').value
+      };
+      if (role === 'student') {
+        payload.roll_no = document.getElementById('rollNo').value;
+        payload.course = document.getElementById('course').value;
+        payload.semester = parseInt(document.getElementById('semester').value || '0', 10);
+      } else if (role === 'staff') {
+        payload.dept = document.getElementById('dept').value;
+        payload.designation = document.getElementById('designation').value;
+      }
+
+      try {
+        let res;
+        if (id) {
+          if (!payload.password) delete payload.password;
+          res = await fetch(`/api/admin/user/${id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+        } else {
+          res = await fetch('/api/admin/user', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+        }
+        if (res.ok) {
+          alert(id ? 'User updated' : 'User added');
+          closeModal();
+          loadAll();
+        } else {
+          const err = await res.json().catch(() => ({ error: 'Request failed' }));
+          alert(err.error || 'Add/Update failed');
+        }
+      } catch {
+        alert('Request failed');
+      }
+    });
+
+    async function deleteUser(id) {
+      if (!confirm('Delete user ' + id + '?')) return;
+      try {
+        const res = await fetch(`/api/admin/user/${id}`, { method: 'DELETE' });
+        if (res.ok) {
+          loadAll();
+        } else {
+          alert('Delete failed');
+        }
+      } catch {
+        alert('Delete error');
+      }
+    }
+
+    function loadAll() {
+      loadStudents();
+      loadStaff();
+      loadAdmins();
+    }
+
+    loadAll();
+  </script>
+</body>
+</html>

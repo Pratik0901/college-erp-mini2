@@ -1,0 +1,101 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Admin Dashboard</title>
+  <link rel="stylesheet" href="../common/styles.css">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+</head>
+<body>
+  <header>
+    <div class="profile">
+      <img src="https://img.icons8.com/emoji/48/000000/man-office-worker.png"/>
+      <div>
+        <div style="font-weight:600">Admin User</div>
+        <div class="small-muted">Administrator</div>
+      </div>
+    </div>
+    <div>
+      <a class="btn secondary" href="#" onclick="logout()">Logout</a>
+    </div>
+  </header>
+
+  <div class="container">
+    <h1 style="color:#fff">Admin Dashboard 🎯</h1>
+    <p style="color:#fff;opacity:0.9">System Overview & Management</p>
+
+    <!-- KPIs -->
+    <div class="kpis">
+      <div class="kpi">
+        <h2 id="totalStudents">--</h2>
+        <p>Total Students</p>
+      </div>
+      <div class="kpi">
+        <h2 id="totalStaff">--</h2>
+        <p>Faculty Members</p>
+      </div>
+      <div class="kpi">
+        <h2 id="totalCourses">--</h2>
+        <p>Active Courses</p>
+      </div>
+      <div class="kpi">
+        <h2 id="openComplaints">--</h2>
+        <p>Open Complaints</p>
+      </div>
+    </div>
+
+    <!-- Management Cards -->
+    <div class="card-grid">
+      <div class="card">
+        <h3>👥 Manage Users</h3>
+        <p class="muted">Add, edit, or remove students and faculty</p>
+        <a class="btn" href="manage-users.html" style="margin-top:16px">Manage Users</a>
+      </div>
+
+      <div class="card">
+        <h3>📚 Manage Courses</h3>
+        <p class="muted">Create and manage course offerings</p>
+        <a class="btn" href="manage-courses.html" style="margin-top:16px">Manage Courses</a>
+      </div>
+
+      <div class="card">
+        <h3>📊 View Attendance</h3>
+        <p class="muted">Monitor overall attendance statistics</p>
+        <a class="btn" href="manage-attendance.html" style="margin-top:16px">View Reports</a>
+      </div>
+
+      <div class="card">
+        <h3>📝 Complaints</h3>
+        <p class="muted">Review and resolve student complaints</p>
+        <a class="btn" href="view-complaints.html" style="margin-top:16px">View Complaints</a>
+      </div>
+
+      <div class="card">
+        <h3>🔔 Send Notifications</h3>
+        <p class="muted">Broadcast important announcements</p>
+        <a class="btn" href="send-notifications.html" style="margin-top:16px">Send Notification</a>
+      </div>
+
+      <div class="card">
+        <h3>📈 System Reports</h3>
+        <p class="muted">Generate comprehensive reports</p>
+        <a class="btn" href="#" style="margin-top:16px">View Reports</a>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    function logout() {
+      localStorage.removeItem('adminToken');
+      window.location.href = '../index.html';
+    }
+
+    window.addEventListener('load', () => {
+      const token = localStorage.getItem('adminToken');
+      if (!token) {
+        window.location.href = 'admin-login.html';
+      }
+    });
+  </script>
+</body>
+</html>

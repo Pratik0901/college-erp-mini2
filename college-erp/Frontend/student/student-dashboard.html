@@ -1,0 +1,232 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Student Dashboard</title>
+  <link rel="stylesheet" href="../common/styles.css">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>
+    /* Improved font visibility & hierarchy */
+    :root{
+      --font-stack:"Segoe UI",Roboto,system-ui,-apple-system,"Helvetica Neue",Arial,sans-serif;
+      --color-text:#222;
+      --color-heading:#0f172a;
+      --color-muted:#5b6672;
+      --color-muted-small:#6e7a85;
+      --color-accent:#25a0c9;
+    }
+    body{
+      font-family:var(--font-stack);
+      font-size:17px;
+      line-height:1.6;
+      font-weight:500;
+      -webkit-font-smoothing:antialiased;
+      color:var(--color-text);
+      letter-spacing:.25px;
+    }
+    h1,h2,h3{
+      font-weight:700;
+      letter-spacing:.45px;
+      color:var(--color-heading);
+      margin:0;
+    }
+    h1{font-size:36px;}
+    .kpi h2{font-size:32px;font-weight:700;margin:0 0 4px;}
+    .card h3{font-size:19px;font-weight:700;letter-spacing:.4px;margin:0 0 10px;}
+    .muted{color:var(--color-muted)!important;font-weight:500;}
+    .small-muted{color:var(--color-muted-small)!important;font-size:13px;font-weight:500;letter-spacing:.3px;}
+    .btn{font-weight:600;letter-spacing:.35px;}
+    #attendanceDisplay,#gpaDisplay,#attendancePercent,#avgMarks,#pendingFees{font-weight:700;letter-spacing:.3px;}
+    /* Notifications */
+    #notificationsList{max-height:300px;overflow-y:auto;font-size:14px;}
+    .notif-entry{position:relative;padding:12px 10px;border-bottom:1px solid #e4e7ea;line-height:1.5;}
+    .notif-entry strong{display:block;font-size:15px;font-weight:700;margin-bottom:4px;color:var(--color-heading);letter-spacing:.35px;}
+    .notif-entry .small-muted{color:#46515c!important;font-size:12.5px;letter-spacing:.25px;}
+    .notif-del{position:absolute;top:8px;right:8px;background:none;border:none;cursor:pointer;font-size:15px;color:#d9534f;transition:color .15s;}
+    .notif-del:hover{color:#b52b27;}
+    .pill{font-weight:600;font-size:14px;letter-spacing:.3px;}
+    @media (max-width:900px){
+      h1{font-size:30px;}
+      .kpi h2{font-size:26px;}
+      .card h3{font-size:18px;}
+    }
+    @media (max-width:600px){
+      h1{font-size:26px;}
+      .kpis{grid-template-columns:repeat(2,1fr);}
+      .notif-entry{padding:10px 8px;}
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="profile">
+      <img src="https://img.icons8.com/emoji/48/000000/student-emoji.png"/>
+      <div>
+        <div style="font-weight:600" id="studentName">--</div>
+        <div class="small-muted" id="studentUsername">@--</div>
+      </div>
+    </div>
+    <div>
+      <a class="btn secondary" href="#" onclick="logout()">Logout</a>
+    </div>
+  </header>
+
+  <div class="container">
+    <h1 style="color:#fff;margin-bottom:8px">Welcome Back! 👋</h1>
+    <p style="color:#fff;opacity:0.9">Here's your academic overview</p>
+
+    <!-- KPI Cards -->
+    <div class="kpis">
+      <div class="kpi">
+        <h2 id="attendancePercent">--</h2>
+        <p>Attendance</p>
+      </div>
+      <div class="kpi">
+        <h2 id="avgMarks">--</h2>
+        <p>Average Marks</p>
+      </div>
+      <div class="kpi">
+        <h2 id="pendingFees">--</h2>
+        <p>Pending Fees</p>
+      </div>
+    </div>
+
+    <!-- Main Dashboard Cards -->
+    <div class="card-grid">
+      <div class="card">
+        <h3>📊 Grade Reports</h3>
+        <p class="muted">View your academic performance</p>
+        <div style="margin:20px 0">
+          <div style="font-size:32px;color:#25a0c9" id="gpaDisplay">3.8</div>
+          <div class="small-muted">Current GPA</div>
+        </div>
+        <a class="btn" href="grades.html">View Grades</a>
+        <a class="btn secondary" style="margin-left:8px" href="complaint.html">Report Issue</a>
+      </div>
+
+      <div class="card">
+        <h3>💳 Fee Payment</h3>
+        <p class="muted">Manage your fee payments</p>
+        <div style="margin:20px 0">
+          <div class="pill" style="background:#ffecec;color:#d9534f">Pending: ₹<span id="feeAmount">15000</span></div>
+        </div>
+        <a class="btn" href="#" onclick="alert('Payment gateway integration pending')">Pay Now</a>
+      </div>
+
+      <div class="card">
+        <h3>📅 Attendance Tracker</h3>
+        <p class="muted">Monitor your class attendance</p>
+        <div style="margin:20px 0;text-align:center">
+          <div style="font-size:32px;color:#25a0c9" id="attendanceDisplay">85%</div>
+          <div class="small-muted">Overall Attendance</div>
+        </div>
+        <a class="btn" href="subject-attendance.html">View Details</a>
+      </div>
+    </div>
+
+    <!-- Secondary Row -->
+    <div class="row">
+      <div class="card">
+        <h3>🔔 Notifications</h3>
+        <div id="notificationsList">
+          <p class="muted">Loading notifications...</p>
+        </div>
+      </div>
+      
+      <div class="card">
+        <h3>📚 Study Materials</h3>
+        <p class="muted">Download course materials and resources</p>
+        <a class="btn" href="materials.html" style="margin-top:12px">View Materials</a>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    function logout() {
+      localStorage.removeItem('studentToken');
+      localStorage.removeItem('studentData');
+      window.location.href = '../index.html';
+    }
+
+    function loadStudent() {
+      const token = localStorage.getItem('studentToken');
+      if (!token) { window.location.href='student-login.html'; return; }
+      const dataStr = localStorage.getItem('studentData');
+      if (!dataStr) return;
+      try {
+        const s = JSON.parse(dataStr);
+        document.getElementById('studentName').textContent = s.full_name || s.username;
+        document.getElementById('studentUsername').textContent = '@' + (s.username || '');
+        loadSummary(s.id);
+        loadNotifications(s.id);
+      } catch {}
+    }
+
+    async function loadSummary(userId) {
+      try {
+        const res = await fetch(`/api/student/${userId}/summary`);
+        if (!res.ok) return;
+        const data = await res.json();
+        const attendance = data.attendance_percent ?? 0;
+        const avg = data.avg_marks ?? 0;
+        const fees = data.pending_fees ?? 0;
+        document.getElementById('attendancePercent').textContent = attendance + '%';
+        const attendanceDisplay = document.getElementById('attendanceDisplay');
+        if (attendanceDisplay) attendanceDisplay.textContent = attendance + '%';
+        document.getElementById('avgMarks').textContent = avg;
+        document.getElementById('pendingFees').textContent = '₹' + Number(fees).toFixed(2);
+        const feeAmount = document.getElementById('feeAmount');
+        if (feeAmount) feeAmount.textContent = Number(fees).toFixed(2);
+      } catch (e) {
+        console.warn('Summary load failed', e);
+      }
+    }
+
+    async function loadNotifications(userId){
+      try{
+        const res = await fetch(`/api/user/${userId}/notifications`);
+        const rows = await res.json();
+        const container = document.getElementById('notificationsList');
+        if(!Array.isArray(rows)){ container.innerHTML='<p class="muted">Failed to load</p>'; return;}
+        container.innerHTML = rows.map(n => `
+          <div class="notif-entry" id="notif_${n.id}">
+            <button class="notif-del" title="Delete" onclick="deleteNotification(${n.id})">🗑️</button>
+            <strong>${n.title}</strong>
+            <div class="small-muted">${n.body}</div>
+            <div class="small-muted" style="margin-top:4px">
+              From: ${n.sender_full_name || n.sender_username || 'System'} · ${new Date(n.created_at).toLocaleString()}
+            </div>
+          </div>
+        `).join('') || '<p class="muted">No notifications</p>';
+      }catch(e){
+        document.getElementById('notificationsList').innerHTML='<p class="muted">Error loading notifications</p>';
+      }
+    }
+
+    async function deleteNotification(id){
+      const dataStr = localStorage.getItem('studentData');
+      if(!dataStr) return;
+      const u = JSON.parse(dataStr);
+      if(!confirm('Delete this notification?')) return;
+      try{
+        const res = await fetch(`/api/notification/${id}`, {
+          method:'DELETE',
+            headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({user_id: u.id})
+        });
+        if(res.ok){
+          const el = document.getElementById('notif_'+id);
+          if(el) el.remove();
+          if(!document.querySelector('#notificationsList .notif-entry')){
+            document.getElementById('notificationsList').innerHTML='<p class="muted">No notifications</p>';
+          }
+        }else{
+          alert('Delete failed');
+        }
+      }catch{alert('Delete error');}
+    }
+
+    window.addEventListener('load', loadStudent);
+  </script>
+</body>
+</html>

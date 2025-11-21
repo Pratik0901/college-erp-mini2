@@ -1,0 +1,220 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Send Notification</title>
+  <link rel="stylesheet" href="../common/styles.css">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>
+    body{font-size:16px;line-height:1.55;font-weight:500;}
+    h1,h3,label{font-weight:700;}
+    .dual-grid{display:flex;flex-wrap:wrap;gap:24px;margin-top:24px}
+    .dual-grid .card{flex:1 1 320px}
+    #adminNotificationsList{max-height:340px;overflow-y:auto;margin-top:12px}
+    .notif-row{position:relative;padding:10px 12px;border-bottom:1px solid #eee;font-size:14px}
+    .notif-row:last-child{border-bottom:none}
+    .notif-del{position:absolute;top:6px;right:6px;background:none;border:none;color:#d9534f;font-size:14px;cursor:pointer}
+    .notif-del:hover{color:#b52b27}
+    .notif-meta{font-weight:500;}
+    .muted{color:#e5e9ed!important;}
+  </style>
+</head>
+<body>
+  <header>
+    <div class="profile">
+      <img src="https://img.icons8.com/emoji/48/000000/man-office-worker.png"/>
+      <div>
+        <div style="font-weight:600">Admin User</div>
+        <div class="small-muted">Administrator</div>
+      </div>
+    </div>
+    <div>
+      <a class="btn secondary" href="admin-dashboard.html">← Back</a>
+    </div>
+  </header>
+
+  <div class="container">
+    <h1 style="color:#fff">Send System Notification</h1>
+    <div class="dual-grid">
+      <!-- LEFT: Send form (existing card) -->
+      <div class="card" style="max-width:600px">
+        <form id="notificationForm">
+          <div class="form-group">
+            <label>Target Audience</label>
+            <select id="targetRole" required>
+              <option value="all">All Users</option>
+              <option value="student">Students Only</option>
+              <option value="staff">Faculty Only</option>
+              <option value="admin">Admins Only</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Title</label>
+            <input type="text" id="title" required placeholder="e.g., System Maintenance Notice">
+          </div>
+          <div class="form-group">
+            <label>Message</label>
+            <textarea id="body" required placeholder="Enter notification message..." rows="6"></textarea>
+          </div>
+          <div class="form-group" style="margin-top:12px">
+            <label><input type="checkbox" id="specificToggle"> Send to specific user (optional)</label>
+          </div>
+          <div class="form-group" id="specificUserWrapper" style="display:none">
+            <label>Select User</label>
+            <select id="specificUserSelect">
+              <option value="">-- Select User --</option>
+            </select>
+          </div>
+         
+          <button type="submit" class="btn">Send Notification</button>
+        </form>
+      </div>
+      <!-- RIGHT: Notifications list -->
+      <div class="card" style="max-width:600px">
+        <h3 style="margin-bottom:8px">Recent Notifications</h3>
+        <div id="adminNotificationsList">
+          <p class="muted">Loading...</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const targetRoleEl = document.getElementById('targetRole');
+    const toggleEl = document.getElementById('specificToggle');
+    const wrapperEl = document.getElementById('specificUserWrapper');
+    const selectEl = document.getElementById('specificUserSelect');
+
+    async function loadUsersForRole(role){
+      try {
+        if(role==='student'){
+          const r = await fetch('/api/admin/students');
+          const data = await r.json();
+          selectEl.innerHTML = '<option value="">-- Select Student --</option>' +
+            data.map(s => `<option value="${s.user_id}">${s.roll_no} - ${s.full_name}</option>`).join('');
+        } else if(role==='staff'){
+          const r = await fetch('/api/admin/staff');
+          const data = await r.json();
+          selectEl.innerHTML = '<option value="">-- Select Staff --</option>' +
+            data.map(s => `<option value="${s.user_id}">${s.username} - ${s.full_name}</option>`).join('');
+        } else if(role==='admin'){
+          const r = await fetch('/api/admin/users?role=admin');
+          const data = await r.json();
+          selectEl.innerHTML = '<option value="">-- Select Admin --</option>' +
+            data.map(a => `<option value="${a.id}">${a.username} - ${a.full_name}</option>`).join('');
+        } else {
+          selectEl.innerHTML = '<option value="">-- Not applicable --</option>';
+        }
+      } catch {
+        selectEl.innerHTML = '<option value="">-- Load failed --</option>';
+      }
+    }
+
+    function updateSpecificVisibility(){
+      if(toggleEl.checked){
+        wrapperEl.style.display='block';
+        loadUsersForRole(targetRoleEl.value);
+      } else {
+        wrapperEl.style.display='none';
+        selectEl.value='';
+      }
+    }
+
+    targetRoleEl.addEventListener('change', () => {
+      if(toggleEl.checked) loadUsersForRole(targetRoleEl.value);
+    });
+    toggleEl.addEventListener('change', updateSpecificVisibility);
+
+    async function fetchAdminNotifications(){
+      try{
+        const adminId = parseInt(localStorage.getItem('adminUserId')||'0',10);
+        let rows = [];
+        if(adminId){
+          const r = await fetch(`/api/user/${adminId}/notifications`);
+          rows = await r.json();
+        }else{
+          const r = await fetch('/api/notifications?role=admin');
+          rows = await r.json();
+        }
+        renderNotificationsList(Array.isArray(rows)?rows:[]);
+      }catch{
+        renderNotificationsList([]);
+      }
+    }
+
+    function renderNotificationsList(list){
+      const box = document.getElementById('adminNotificationsList');
+      if(!box) return;
+      if(!list.length){
+        box.innerHTML = '<p class="muted">No notifications</p>';
+        return;
+      }
+      box.innerHTML = list.map(n=>`
+        <div class="notif-row" id="notif_${n.id}">
+          <button class="notif-del" title="Delete" onclick="deleteNotification(${n.id})">🗑️</button>
+          <strong>${n.title}</strong>
+          <div>${n.body}</div>
+          <div class="notif-meta">
+            Target: ${n.target_role} • From: ${n.sender_full_name||n.sender_username||'System'} • ${new Date(n.created_at).toLocaleString()}
+          </div>
+        </div>
+      `).join('');
+    }
+
+    async function deleteNotification(id){
+      const adminId = parseInt(localStorage.getItem('adminUserId')||'0',10);
+      if(!adminId) { alert('Admin ID missing'); return; }
+      if(!confirm('Delete this notification?')) return;
+      try{
+        const res = await fetch(`/api/notification/${id}`, {
+          method:'DELETE',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({user_id: adminId})
+        });
+        if(res.ok){
+          const el = document.getElementById('notif_'+id);
+          if(el) el.remove();
+          if(!document.querySelector('#adminNotificationsList .notif-row')){
+            document.getElementById('adminNotificationsList').innerHTML='<p class="muted">No notifications</p>';
+          }
+        }else{
+          alert('Delete failed');
+        }
+      }catch{alert('Delete error');}
+    }
+
+    document.getElementById('notificationForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const data = {
+        title: document.getElementById('title').value,
+        body: document.getElementById('body').value,
+        target_role: targetRoleEl.value
+      };
+      if (toggleEl.checked && selectEl.value) data.target_user_id = parseInt(selectEl.value,10);
+      const sender = localStorage.getItem('adminUserId');
+      if (sender) data.sender_user_id = parseInt(sender,10);
+      try {
+        const res = await fetch('/api/notification', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify(data)
+        });
+        const j = await res.json().catch(()=>({}));
+        if(res.ok){
+          alert('Notification sent. Emails queued: '+(j.emails_queued??0));
+          e.target.reset(); updateSpecificVisibility();
+          fetchAdminNotifications(); // refresh list
+        }else{
+          alert('Failed: ' + (j.error || res.status));
+        }
+      } catch (err) {
+        alert('Error: ' + err.message);
+      }
+    });
+
+    window.addEventListener('load', () => {
+      updateSpecificVisibility();
+      fetchAdminNotifications();
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,49 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>College ERP System</title>
+  <link rel="stylesheet" href="common/styles.css">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>
+    .portal-grid{display:flex;gap:24px;justify-content:center;flex-wrap:wrap;margin-top:60px}
+    .portal{background:#fff;padding:40px;border-radius:14px;width:280px;text-align:center;box-shadow:0 12px 30px rgba(0,0,0,0.12);cursor:pointer;transition:all 0.3s}
+    .portal:hover{transform:translateY(-10px);box-shadow:0 20px 40px rgba(0,0,0,0.2)}
+    .portal img{width:64px;height:64px}
+    .portal h2{margin:16px 0 8px;font-size:22px;font-weight:700}
+    .hero{padding:60px 20px;text-align:center;color:#fff}
+    .hero h1{font-size:48px;margin:0;font-weight:800;letter-spacing:.6px}
+    .hero p{font-size:18px;margin-top:12px;opacity:0.9}
+    body{font-size:16px;line-height:1.55;font-weight:500;-webkit-font-smoothing:antialiased;}
+    .portal p{font-weight:500;color:#4a4f58;}
+  </style>
+</head>
+<body>
+  <div class="hero">
+    <h1>🎓 College ERP System</h1>
+    <p>Complete Management Solution for Educational Institutions</p>
+  </div>
+
+  <div class="container">
+    <div class="portal-grid">
+      <div class="portal" onclick="location.href='admin/admin-login.html'">
+        <img src="https://img.icons8.com/fluency/96/000000/administrator-male.png"/>
+        <h2>Admin Portal</h2>
+        <p class="muted">Manage students, faculty, courses & system</p>
+      </div>
+      
+      <div class="portal" onclick="location.href='staff/staff-login.html'">
+        <img src="https://img.icons8.com/fluency/96/000000/teacher.png"/>
+        <h2>Faculty Portal</h2>
+        <p class="muted">Attendance, grades & materials</p>
+      </div>
+      
+      <div class="portal" onclick="location.href='student/student-login.html'">
+        <img src="https://img.icons8.com/fluency/96/000000/student-male.png"/>
+        <h2>Student Portal</h2>
+        <p class="muted">View attendance, grades & fees</p>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

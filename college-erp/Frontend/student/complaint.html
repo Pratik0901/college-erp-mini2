@@ -1,0 +1,81 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Submit Complaint</title>
+  <link rel="stylesheet" href="../common/styles.css">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+</head>
+<body>
+  <header>
+    <div class="profile">
+      <img src="https://img.icons8.com/emoji/48/000000/student-emoji.png"/>
+      <div>
+        <div style="font-weight:600" id="studentName">--</div>
+        <div class="small-muted" id="studentUsername">@--</div>
+      </div>
+    </div>
+    <div>
+      <a class="btn secondary" href="student-dashboard.html">← Back</a>
+    </div>
+  </header>
+
+  <div class="container">
+    <h1 style="color:#fff">Submit Complaint</h1>
+    
+    <div class="card" style="margin-top:24px;max-width:600px">
+      <h3>File a Complaint</h3>
+      <form id="complaintForm">
+        <div class="form-group">
+          <label>Subject</label>
+          <input type="text" id="subject" required>
+        </div>
+        <div class="form-group">
+          <label>Description</label>
+          <textarea id="description" required></textarea>
+        </div>
+        <button type="submit" class="btn">Submit Complaint</button>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    function ensureStudent() {
+      const token = localStorage.getItem('studentToken');
+      const sStr = localStorage.getItem('studentData');
+      if (!token || !sStr) { window.location.href='student-login.html'; return null; }
+      try {
+        const s = JSON.parse(sStr);
+        document.getElementById('studentName').textContent = s.full_name || s.username;
+        document.getElementById('studentUsername').textContent = '@' + (s.username || '');
+        return s;
+      } catch { window.location.href='student-login.html'; return null; }
+    }
+
+    window.addEventListener('load', () => {
+      const s = ensureStudent(); if (!s) return;
+      document.getElementById('complaintForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const data = {
+          user_id: s.id,
+          subject: document.getElementById('subject').value,
+          description: document.getElementById('description').value
+        };
+        try {
+          const res = await fetch('/api/student/complaint', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(data)
+          });
+          if (res.ok) {
+            alert('Complaint submitted successfully!');
+            window.location.href = 'student-dashboard.html';
+          } else {
+            alert('Failed to submit complaint');
+          }
+        } catch { alert('Error submitting complaint'); }
+      });
+    });
+  </script>
+</body>
+</html>

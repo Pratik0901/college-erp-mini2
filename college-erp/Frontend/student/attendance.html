@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Attendance Details - Student Portal</title>
+  <link rel="stylesheet" href="../common/styles.css">
+</head>
+<body>
+  <header>
+    <div class="profile">
+      <img src="https://img.icons8.com/emoji/48/000000/student-emoji.png" alt="Student">
+      <div class="profile-info">
+        <h3 id="studentName">--</h3>
+        <p id="studentUsername">@--</p>
+      </div>
+    </div>
+    <div>
+      <a href="student-dashboard.html" class="btn secondary">Back to Dashboard</a>
+    </div>
+  </header>
+
+  <div class="container">
+    <h1 style="color:#fff; margin-top:20px;">Attendance Details</h1>
+    
+    <div class="card mt-20">
+      <h3>Subject-wise Attendance</h3>
+      <table id="attendance-table">
+        <thead>
+          <tr>
+            <th>Course Code</th>
+            <th>Course Name</th>
+            <th>Present</th>
+            <th>Absent</th>
+            <th>Total</th>
+            <th>Percentage</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td colspan="7" class="text-center">Loading...</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    const API_URL = '/api';
+
+    function ensureStudent() {
+      const token = localStorage.getItem('studentToken');
+      const sStr = localStorage.getItem('studentData');
+      if (!token || !sStr) { window.location.href='student-login.html'; return null; }
+      try {
+        const s = JSON.parse(sStr);
+        document.getElementById('studentName').textContent = s.full_name || s.username;
+        document.getElementById('studentUsername').textContent = '@' + (s.username || '');
+        return s;
+      } catch { window.location.href='student-login.html'; return null; }
+    }
+
+    document.addEventListener('DOMContentLoaded', async () => {
+      const s = ensureStudent(); if (!s) return;
+      try {
+        const response = await fetch(`${API_URL}/student/${s.id}/subjects`);
+        const subjects = await response.json();
+        const tbody = document.querySelector('#attendance-table tbody');
+        tbody.innerHTML = '';
+        (subjects || []).forEach(subject => {
+          const absent = (subject.total || 0) - (subject.present || 0);
+          const percent = subject.percent ?? 0;
+          const status = percent >= 75 ?
+            '<span class="badge success">Good Standing</span>' :
+            '<span class="badge danger">Below Requirement</span>';
+          const row = document.createElement('tr');
+          row.innerHTML = `
+            <td>${subject.code}</td>
+            <td>${subject.title}</td>
+            <td style="color:var(--success); font-weight:bold;">${subject.present}</td>
+            <td style="color:var(--danger); font-weight:bold;">${absent}</td>
+            <td>${subject.total}</td>
+            <td><strong>${percent}%</strong></td>
+            <td>${status}</td>
+          `;
+          tbody.appendChild(row);
+        });
+      } catch (error) {
+        console.error('Error:', error);
+      }
+    });
+  </script>
+</body>
+</html>

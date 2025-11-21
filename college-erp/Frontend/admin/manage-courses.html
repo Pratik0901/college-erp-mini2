@@ -1,0 +1,130 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Manage Courses</title>
+  <link rel="stylesheet" href="../common/styles.css">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+</head>
+<body>
+  <header>
+    <div class="profile">
+      <img src="https://img.icons8.com/emoji/48/000000/man-office-worker.png"/>
+      <div>
+        <div style="font-weight:600">Admin User</div>
+        <div class="small-muted">Administrator</div>
+      </div>
+    </div>
+    <div>
+      <a class="btn secondary" href="admin-dashboard.html">← Back</a>
+    </div>
+  </header>
+
+  <div class="container">
+    <h1 style="color:#fff">Manage Courses</h1>
+    
+    <div class="card" style="margin-top:24px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+        <h3>Course List</h3>
+        <button class="btn" onclick="showAddCourseModal()">+ Add Course</button>
+      </div>
+      
+      <table>
+        <thead>
+          <tr>
+            <th>Code</th>
+            <th>Title</th>
+            <th>Credits</th>
+          </tr>
+        </thead>
+        <tbody id="coursesList">
+          <tr><td colspan="3">Loading...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Add Course Modal -->
+  <div id="addCourseModal" class="modal">
+    <div class="modal-content">
+      <h3>Add New Course</h3>
+      <form id="addCourseForm">
+        <div class="form-group">
+          <label>Course Code</label>
+          <input type="text" id="courseCode" required placeholder="e.g., CS301">
+        </div>
+        <div class="form-group">
+          <label>Course Title</label>
+          <input type="text" id="courseTitle" required placeholder="e.g., Data Structures">
+        </div>
+        <div class="form-group">
+          <label>Credits</label>
+          <input type="number" id="credits" min="1" max="6" value="3" required>
+        </div>
+        
+        <div style="display:flex;gap:12px;margin-top:20px">
+          <button type="submit" class="btn">Add Course</button>
+          <button type="button" class="btn secondary" onclick="closeCourseModal()">Cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    async function loadCourses() {
+      const res = await fetch('/api/admin/courses');
+      const courses = await res.json();
+      
+      const tbody = document.getElementById('coursesList');
+      if (courses.length > 0) {
+        tbody.innerHTML = courses.map(c => `
+          <tr>
+            <td><strong>${c.code}</strong></td>
+            <td>${c.title}</td>
+            <td>${c.credits}</td>
+          </tr>
+        `).join('');
+      } else {
+        tbody.innerHTML = '<tr><td colspan="3">No courses found</td></tr>';
+      }
+    }
+    
+    function showAddCourseModal() {
+      document.getElementById('addCourseModal').classList.add('active');
+    }
+    
+    function closeCourseModal() {
+      document.getElementById('addCourseModal').classList.remove('active');
+    }
+    
+    document.getElementById('addCourseForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      
+      const data = {
+        code: document.getElementById('courseCode').value,
+        title: document.getElementById('courseTitle').value,
+        credits: parseInt(document.getElementById('credits').value)
+      };
+      
+      try {
+        const res = await fetch('/api/admin/course', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(data)
+        });
+        
+        if (res.ok) {
+          alert('Course added successfully!');
+          closeCourseModal();
+          loadCourses();
+          e.target.reset();
+        }
+      } catch (err) {
+        alert('Error adding course');
+      }
+    });
+    
+    loadCourses();
+  </script>
+</body>
+</html>

@@ -1,0 +1,85 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Subject-wise Attendance</title>
+  <link rel="stylesheet" href="../common/styles.css">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+</head>
+<body>
+  <header>
+    <div class="profile">
+      <img src="https://img.icons8.com/emoji/48/000000/student-emoji.png"/>
+      <div>
+        <div style="font-weight:600" id="studentName">--</div>
+        <div class="small-muted" id="studentUsername">@--</div>
+      </div>
+    </div>
+    <div>
+      <a class="btn secondary" href="student-dashboard.html">← Back</a>
+    </div>
+  </header>
+
+  <div class="container">
+    <h1 style="color:#fff">Subject-wise Attendance</h1>
+    
+    <div class="card" style="margin-top:24px">
+      <div id="subjectsList">
+        <p>Loading...</p>
+      </div>
+    </div>
+  </div>
+
+  <style>
+    body{font-size:16px;line-height:1.55;font-weight:500;}
+    h1{font-weight:700;}
+    .small-muted{color:#e7eaef!important;font-weight:500;}
+    strong{font-weight:700;}
+  </style>
+
+  <script>
+    function ensureStudent() {
+      const token = localStorage.getItem('studentToken');
+      const sStr = localStorage.getItem('studentData');
+      if (!token || !sStr) { window.location.href = 'student-login.html'; return null; }
+      try {
+        const s = JSON.parse(sStr);
+        document.getElementById('studentName').textContent = s.full_name || s.username;
+        document.getElementById('studentUsername').textContent = '@' + (s.username || '');
+        return s;
+      } catch { window.location.href='student-login.html'; return null; }
+    }
+
+    async function loadSubjects(uid) {
+      try {
+        const res = await fetch(`/api/student/${uid}/subjects`);
+        const subjects = await res.json();
+        const html = (subjects || []).map(s => `
+          <div style="padding:16px;border-bottom:1px solid #eee">
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <div>
+                <strong>${s.code} - ${s.title}</strong>
+                <div class="small-muted">Present: ${s.present} / ${s.total} classes</div>
+              </div>
+              <div style="text-align:right">
+                <div style="font-size:24px;color:${(s.percent ?? 0) >= 75 ? '#2ecc71' : '#e74c3c'}">${s.percent ?? 0}%</div>
+              </div>
+            </div>
+            <div class="progress" style="margin-top:8px">
+              <span style="width:${s.percent ?? 0}%"></span>
+            </div>
+          </div>
+        `).join('');
+        document.getElementById('subjectsList').innerHTML = html || '<p class="muted">No subjects found</p>';
+      } catch (e) {
+        console.error('Error:', e);
+      }
+    }
+
+    window.addEventListener('load', () => {
+      const s = ensureStudent(); if (!s) return;
+      loadSubjects(s.id);
+    });
+  </script>
+</body>
+</html>

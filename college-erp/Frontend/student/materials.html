@@ -1,0 +1,77 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Study Materials</title>
+  <link rel="stylesheet" href="../common/styles.css">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+</head>
+<body>
+  <header>
+    <div class="profile">
+      <img src="https://img.icons8.com/emoji/48/000000/student-emoji.png"/>
+      <div>
+        <div style="font-weight:600" id="studentName">--</div>
+        <div class="small-muted" id="studentUsername">@--</div>
+      </div>
+    </div>
+    <div>
+      <a class="btn secondary" href="student-dashboard.html">← Back</a>
+    </div>
+  </header>
+
+  <div class="container">
+    <h1 style="color:#fff">Study Materials</h1>
+    
+    <div class="card" style="margin-top:24px">
+      <h3>Available Materials</h3>
+      <div id="materialsList">
+        <p>Loading...</p>
+      </div>
+    </div>
+  </div>
+
+  <style>
+    body{font-size:16px;line-height:1.55;font-weight:500;}
+    h1,h3{font-weight:700;}
+    .small-muted{color:#dfe3e8!important;}
+    .card strong{font-weight:700;}
+  </style>
+
+  <script>
+    function ensureStudent() {
+      const token = localStorage.getItem('studentToken');
+      const sStr = localStorage.getItem('studentData');
+      if (!token || !sStr) { window.location.href='student-login.html'; return null; }
+      try {
+        const s = JSON.parse(sStr);
+        document.getElementById('studentName').textContent = s.full_name || s.username;
+        document.getElementById('studentUsername').textContent = '@' + (s.username || '');
+        return s;
+      } catch { window.location.href='student-login.html'; return null; }
+    }
+
+    async function loadMaterials(uid) {
+      try {
+        const res = await fetch(`/api/student/${uid}/materials`);
+        const materials = await res.json();
+        const html = (materials || []).map(m => `
+          <div style="padding:12px;border-bottom:1px solid #eee;display:flex;justify-content:space-between;align-items:center">
+            <div>
+              <strong>${m.title}</strong>
+              <div class="small-muted">${m.code} - ${m.course_title}</div>
+            </div>
+            <a class="btn" href="/uploads/${m.filename}" download>Download</a>
+          </div>
+        `).join('');
+        document.getElementById('materialsList').innerHTML = html || '<p class="muted">No materials available</p>';
+      } catch (e) { console.error('Error:', e); }
+    }
+
+    window.addEventListener('load', () => {
+      const s = ensureStudent(); if (!s) return;
+      loadMaterials(s.id);
+    });
+  </script>
+</body>
+</html>

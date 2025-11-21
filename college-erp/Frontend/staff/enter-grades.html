@@ -1,0 +1,145 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Enter Grades</title>
+  <link rel="stylesheet" href="../common/styles.css">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+</head>
+<body>
+  <header>
+    <div class="profile">
+      <img src="https://img.icons8.com/emoji/48/000000/teacher-emoji.png"/>
+      <div>
+        <div style="font-weight:600" id="staffName">--</div>
+        <div class="small-muted" id="staffDept">Faculty Portal</div>
+      </div>
+    </div>
+    <div>
+      <a class="btn secondary" href="staff-dashboard.html">← Back</a>
+    </div>
+  </header>
+
+  <div class="container">
+    <h1 style="color:#fff">Enter Grades</h1>
+    
+    <div class="card" style="margin-top:24px;max-width:600px">
+      <form id="gradesForm">
+        <div class="form-group">
+          <label>Student</label>
+          <select id="studentSelect" required>
+            <option value="">Loading...</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Course</label>
+          <select id="courseSelect" required>
+            <option value="">Loading...</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Marks (out of 100)</label>
+          <input type="number" id="marks" min="0" max="100" required>
+        </div>
+        <div class="form-group">
+          <label>Grade</label>
+          <select id="grade" required>
+            <option value="A">A (90-100)</option>
+            <option value="B+">B+ (80-89)</option>
+            <option value="B">B (70-79)</option>
+            <option value="C">C (60-69)</option>
+            <option value="D">D (50-59)</option>
+            <option value="F">F (Below 50)</option>
+          </select>
+        </div>
+        <button type="submit" class="btn">Submit Grade</button>
+      </form>
+    </div>
+  </div>
+
+  <style>
+    body{font-size:16px;line-height:1.55;font-weight:500;}
+    h1,h3,label{font-weight:700;}
+    .muted,.small-muted{color:#e3e7ec!important;}
+  </style>
+
+  <script>
+    function ensureStaff() {
+      const token = localStorage.getItem('staffToken');
+      const sStr = localStorage.getItem('staffData');
+      if (!token || !sStr) { window.location.href = 'staff-login.html'; return null; }
+      try {
+        const s = JSON.parse(sStr);
+        document.getElementById('staffName').textContent = s.name || s.username || 'Staff';
+        document.getElementById('staffDept').textContent = s.department || 'Faculty Portal';
+        return { token, staff: s };
+      } catch { window.location.href='staff-login.html'; return null; }
+    }
+    async function refreshStaffProfile(token) {
+      try {
+        const res = await fetch('/api/staff/profile', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token })
+        });
+        if (!res.ok) return;
+        const j = await res.json();
+        if (j.success && j.staff) {
+          localStorage.setItem('staffData', JSON.stringify(j.staff));
+          document.getElementById('staffName').textContent = j.staff.name || j.staff.username || 'Staff';
+          document.getElementById('staffDept').textContent = j.staff.department || 'Faculty Portal';
+        }
+      } catch {}
+    }
+
+    async function loadData() {
+      const [studentsRes, coursesRes] = await Promise.all([
+        fetch('/api/staff/students'),
+        fetch('/api/staff/courses')
+      ]);
+      
+      const students = await studentsRes.json();
+      const courses = await coursesRes.json();
+      
+      document.getElementById('studentSelect').innerHTML = 
+        '<option value="">-- Select Student --</option>' +
+        students.map(s => `<option value="${s.id}">${s.roll_no} - ${s.full_name}</option>`).join('');
+      
+      document.getElementById('courseSelect').innerHTML = 
+        '<option value="">-- Select Course --</option>' +
+        courses.map(c => `<option value="${c.id}">${c.code} - ${c.title}</option>`).join('');
+    }
+    
+    document.getElementById('gradesForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      
+      const data = {
+        student_id: parseInt(document.getElementById('studentSelect').value),
+        course_id: parseInt(document.getElementById('courseSelect').value),
+        marks: parseFloat(document.getElementById('marks').value),
+        grade: document.getElementById('grade').value
+      };
+      
+      try {
+        const res = await fetch('/api/staff/grades', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(data)
+        });
+        
+        if (res.ok) {
+          alert('Grade entered successfully!');
+          e.target.reset();
+        }
+      } catch (e) {
+        alert('Error entering grade');
+      }
+    });
+    
+    window.addEventListener('load', () => {
+      const ctx = ensureStaff(); if (!ctx) return;
+      refreshStaffProfile(ctx.token);
+      loadData();
+    });
+  </script>
+</body>
+</html>
