@@ -5,6 +5,41 @@
   <title>View Complaints</title>
   <link rel="stylesheet" href="../common/styles.css">
   <meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>
+    .complaint-row {
+      border-bottom: 1px solid #dee2e6;
+    }
+    .complaint-details {
+      max-width: 300px;
+      word-wrap: break-word;
+    }
+    .status-badge {
+      padding: 4px 8px;
+      border-radius: 12px;
+      font-size: 0.8em;
+      font-weight: 500;
+      text-transform: uppercase;
+    }
+    .status-open { background: #ffebee; color: #c62828; }
+    .status-in_progress { background: #fff3e0; color: #ef6c00; }
+    .status-resolved { background: #e8f5e8; color: #2e7d32; }
+    .action-buttons {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .btn-small {
+      padding: 4px 8px;
+      font-size: 0.8em;
+      min-width: auto;
+    }
+    .response-text {
+      font-style: italic;
+      color: #666;
+      font-size: 0.9em;
+      margin-top: 4px;
+    }
+  </style>
 </head>
 <body>
   <header>
@@ -23,86 +58,298 @@
   <div class="container">
     <h1 style="color:#fff">Student Complaints</h1>
     
-    <div class="card" style="margin-top:24px">
-      <h3>Complaint List</h3>
+    <div class="card" style="margin-top:24px; overflow-x: auto;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+        <h3>Complaint Management</h3>
+        <button class="btn secondary" onclick="loadComplaints()">🔄 Refresh</button>
+      </div>
       
-      <table>
-        <thead>
-          <tr>
-            <th>ID</th>
-            <th>Student</th>
-            <th>Subject</th>
-            <th>Description</th>
-            <th>Status</th>
-            <th>Date</th>
-            <th>Action</th>
-          </tr>
-        </thead>
-        <tbody id="complaintsList">
-          <tr><td colspan="7">Loading...</td></tr>
-        </tbody>
-      </table>
+      <div id="loadingIndicator" style="text-align: center; padding: 20px; color: #666;">
+        Loading complaints...
+      </div>
+
+      <div id="complaintsContainer" style="display: none;">
+        <table style="width: 100%; min-width: 800px;">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Student</th>
+              <th>Subject</th>
+              <th>Description</th>
+              <th>Status</th>
+              <th>Submitted</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="complaintsList">
+          </tbody>
+        </table>
+      </div>
+
+      <div id="errorMessage" style="display: none; text-align: center; padding: 20px; color: #ff6b6b;">
+        Failed to load complaints. Please try again.
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal for admin response -->
+  <div id="responseModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000;">
+    <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; padding: 30px; border-radius: 8px; max-width: 500px; width: 90%;">
+      <h3 id="modalTitle">Update Complaint Status</h3>
+      
+      <div style="margin: 20px 0;">
+        <label>New Status:</label>
+        <select id="modalStatus" style="width: 100%; padding: 8px; margin-top: 5px;">
+          <option value="open">Open</option>
+          <option value="in_progress">In Progress</option>
+          <option value="resolved">Resolved</option>
+        </select>
+      </div>
+
+      <div style="margin: 20px 0;">
+        <label>Admin Response (optional):</label>
+        <textarea id="modalResponse" placeholder="Enter your response to the student..." style="width: 100%; padding: 8px; margin-top: 5px; min-height: 80px; resize: vertical;"></textarea>
+      </div>
+
+      <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px;">
+        <button class="btn secondary" onclick="closeModal()">Cancel</button>
+        <button class="btn" onclick="saveStatusUpdate()">Update Status</button>
+      </div>
     </div>
   </div>
 
   <script>
+    let currentComplaintId = null;
+
     async function loadComplaints() {
-      const res = await fetch('/api/admin/complaints');
-      const complaints = await res.json();
-      
-      const tbody = document.getElementById('complaintsList');
-      if (complaints.length > 0) {
-        tbody.innerHTML = complaints.map(c => `
-          <tr>
-            <td>${c.id}</td>
-            <td>${c.full_name}</td>
-            <td><strong>${c.subject}</strong></td>
-            <td style="max-width:200px">${c.description.substring(0, 50)}...</td>
-            <td><span class="pill" style="background:${getStatusColor(c.status)};color:#fff">${c.status}</span></td>
-            <td>${new Date(c.created_at).toLocaleDateString()}</td>
-            <td>
-              <select onchange="updateStatus(${c.id}, this.value)">
-                <option value="">Update Status</option>
-                <option value="in_progress">In Progress</option>
-                <option value="resolved">Resolved</option>
-              </select>
-            </td>
-          </tr>
-        `).join('');
-      } else {
-        tbody.innerHTML = '<tr><td colspan="7">No complaints found</td></tr>';
-      }
-    }
-    
-    function getStatusColor(status) {
-      switch(status) {
-        case 'open': return '#ff4757';
-        case 'in_progress': return '#ffa502';
-        case 'resolved': return '#2ecc71';
-        default: return '#7d8b95';
-      }
-    }
-    
-    async function updateStatus(id, status) {
-      if (!status) return;
-      
       try {
-        const res = await fetch(`/api/admin/complaint/${id}/status`, {
-          method: 'PUT',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({ status })
-        });
+        document.getElementById('loadingIndicator').style.display = 'block';
+        document.getElementById('complaintsContainer').style.display = 'none';
+        document.getElementById('errorMessage').style.display = 'none';
+
+        const response = await fetch('/api/admin/complaints');
         
-        if (res.ok) {
-          alert('Status updated successfully!');
-          loadComplaints();
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
         }
-      } catch (err) {
-        alert('Error updating status');
+
+        const complaints = await response.json();
+        displayComplaints(complaints);
+
+      } catch (error) {
+        console.error('Error loading complaints:', error);
+        document.getElementById('loadingIndicator').style.display = 'none';
+        document.getElementById('errorMessage').style.display = 'block';
       }
     }
-    
-    loadComplaints();
+
+    function displayComplaints(complaints) {
+      const tbody = document.getElementById('complaintsList');
+      
+      document.getElementById('loadingIndicator').style.display = 'none';
+      document.getElementById('complaintsContainer').style.display = 'block';
+
+      if (complaints.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 40px; color: #666;">No complaints found</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = complaints.map(complaint => `
+        <tr class="complaint-row">
+          <td><strong>#${complaint.id}</strong></td>
+          <td>${complaint.full_name || 'Unknown'}</td>
+          <td class="complaint-details">
+            <strong>${complaint.subject}</strong>
+            ${complaint.admin_response ? `<div class="response-text">Response: ${complaint.admin_response.substring(0, 50)}${complaint.admin_response.length > 50 ? '...' : ''}</div>` : ''}
+          </td>
+          <td class="complaint-details">${complaint.description.substring(0, 100)}${complaint.description.length > 100 ? '...' : ''}</td>
+          <td>
+            <span class="status-badge status-${complaint.status}">
+              ${formatStatus(complaint.status)}
+            </span>
+          </td>
+          <td>${formatDate(complaint.created_at)}</td>
+          <td>
+            <div class="action-buttons">
+              <button class="btn btn-small" onclick="openStatusModal(${complaint.id}, '${complaint.status}', '${escapeQuotes(complaint.admin_response || '')}')">
+                📝 Update
+              </button>
+              <button class="btn secondary btn-small" onclick="viewComplaintDetails(${complaint.id})">
+                👁️ View
+              </button>
+            </div>
+          </td>
+        </tr>
+      `).join('');
+    }
+
+    function formatStatus(status) {
+      switch(status) {
+        case 'open': return 'Open';
+        case 'in_progress': return 'In Progress';
+        case 'resolved': return 'Resolved';
+        default: return status;
+      }
+    }
+
+    function formatDate(dateString) {
+      if (!dateString) return 'N/A';
+      const date = new Date(dateString);
+      
+      // Check if date is valid
+      if (isNaN(date.getTime())) return 'Invalid Date';
+      
+      // Use system locale and timezone
+      const options = {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true
+      };
+      
+      // This will use your system's timezone and locale settings
+      return date.toLocaleString(undefined, options);
+    }
+
+    function escapeQuotes(text) {
+      return text ? text.replace(/'/g, '&#39;').replace(/"/g, '&#34;') : '';
+    }
+
+    function openStatusModal(complaintId, currentStatus, currentResponse) {
+      currentComplaintId = complaintId;
+      
+      document.getElementById('modalTitle').textContent = `Update Complaint #${complaintId}`;
+      document.getElementById('modalStatus').value = currentStatus;
+      document.getElementById('modalResponse').value = currentResponse.replace(/&#39;/g, "'").replace(/&#34;/g, '"');
+      document.getElementById('responseModal').style.display = 'block';
+      
+      // Focus on the response textarea
+      setTimeout(() => {
+        document.getElementById('modalResponse').focus();
+      }, 100);
+    }
+
+    function closeModal() {
+      document.getElementById('responseModal').style.display = 'none';
+      currentComplaintId = null;
+    }
+
+    async function saveStatusUpdate() {
+      if (!currentComplaintId) return;
+
+      const newStatus = document.getElementById('modalStatus').value;
+      const adminResponse = document.getElementById('modalResponse').value.trim();
+
+      if (!newStatus) {
+        alert('Please select a status');
+        return;
+      }
+
+      try {
+        const updateBtn = document.querySelector('#responseModal .btn:last-child');
+        const originalText = updateBtn.textContent;
+        updateBtn.textContent = 'Updating...';
+        updateBtn.disabled = true;
+
+        const response = await fetch(`/api/admin/complaint/${currentComplaintId}/status`, {
+          method: 'PUT',
+          headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
+          },
+          body: JSON.stringify({ 
+            status: newStatus,
+            admin_response: adminResponse
+          })
+        });
+
+        if (response.ok) {
+          alert('Complaint status updated successfully!');
+          closeModal();
+          loadComplaints(); // Reload the complaints list
+        } else {
+          const errorData = await response.json();
+          alert('Failed to update complaint: ' + (errorData.error || 'Unknown error'));
+        }
+      } catch (error) {
+        console.error('Update error:', error);
+        alert('Error updating complaint status. Please try again.');
+      } finally {
+        const updateBtn = document.querySelector('#responseModal .btn:last-child');
+        if (updateBtn) {
+          updateBtn.textContent = 'Update Status';
+          updateBtn.disabled = false;
+        }
+      }
+    }
+
+    function viewComplaintDetails(complaintId) {
+      // Find the complaint details and show in alert (you can make this a proper modal if needed)
+      fetch('/api/admin/complaints')
+        .then(response => response.json())
+        .then(complaints => {
+          const complaint = complaints.find(c => c.id === complaintId);
+          if (complaint) {
+            const submittedDate = new Date(complaint.created_at);
+            // Use system timezone for detailed view
+            const formattedDate = submittedDate.toLocaleString(undefined, {
+              weekday: 'long',
+              year: 'numeric', 
+              month: 'long', 
+              day: 'numeric',
+              hour: '2-digit',
+              minute: '2-digit',
+              hour12: true
+            });
+            
+            const details = `
+Complaint #${complaint.id}
+Student: ${complaint.full_name}
+Subject: ${complaint.subject}
+
+Description:
+${complaint.description}
+
+Status: ${formatStatus(complaint.status)}
+Submitted: ${formattedDate}
+
+${complaint.admin_response ? `Admin Response:\n${complaint.admin_response}` : 'No admin response yet'}
+            `.trim();
+            alert(details);
+          }
+        })
+        .catch(error => {
+          console.error('Error fetching complaint details:', error);
+          alert('Error loading complaint details');
+        });
+    }
+
+    // Close modal when clicking outside
+    document.getElementById('responseModal').addEventListener('click', function(e) {
+      if (e.target === this) {
+        closeModal();
+      }
+    });
+
+    // Close modal with Escape key
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape' && document.getElementById('responseModal').style.display === 'block') {
+        closeModal();
+      }
+    });
+
+    // Check admin authentication
+    window.addEventListener('load', () => {
+      const token = localStorage.getItem('adminToken');
+      if (!token) {
+        window.location.href = 'admin-login.html';
+        return;
+      }
+      
+      loadComplaints();
+    });
   </script>
 </body>
 </html>

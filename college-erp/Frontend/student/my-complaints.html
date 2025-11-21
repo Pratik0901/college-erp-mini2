@@ -1,0 +1,265 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>My Complaints</title>
+  <link rel="stylesheet" href="../common/styles.css">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>
+    .complaint-item {
+      background: #f8f9fa;
+      border: 1px solid #dee2e6;
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 16px;
+    }
+    .complaint-header {
+      display: flex;
+      justify-content: between;
+      align-items: center;
+      margin-bottom: 12px;
+      flex-wrap: wrap;
+    }
+    .complaint-id {
+      font-size: 0.9em;
+      color: #6c757d;
+      font-weight: 500;
+    }
+    .status-badge {
+      padding: 4px 12px;
+      border-radius: 20px;
+      font-size: 0.85em;
+      font-weight: 500;
+      text-transform: uppercase;
+    }
+    .status-open { background: #fff3cd; color: #856404; }
+    .status-in_progress { background: #d1ecf1; color: #0c5460; }
+    .status-resolved { background: #d4edda; color: #155724; }
+    .complaint-subject {
+      font-size: 1.1em;
+      font-weight: 600;
+      margin-bottom: 8px;
+      color: #212529;
+    }
+    .complaint-description {
+      color: #495057;
+      margin-bottom: 12px;
+      line-height: 1.5;
+    }
+    .complaint-dates {
+      display: flex;
+      gap: 20px;
+      font-size: 0.85em;
+      color: #6c757d;
+      margin-bottom: 12px;
+    }
+    .admin-response {
+      background: #e9ecef;
+      border-left: 4px solid #007bff;
+      padding: 12px;
+      border-radius: 0 4px 4px 0;
+      margin-top: 12px;
+    }
+    .admin-response h4 {
+      margin: 0 0 8px 0;
+      color: #495057;
+      font-size: 0.9em;
+    }
+    .no-complaints {
+      text-align: center;
+      color: #6c757d;
+      padding: 40px;
+      background: #f8f9fa;
+      border-radius: 8px;
+      margin: 20px 0;
+    }
+    .loading {
+      text-align: center;
+      color: #007bff;
+      padding: 40px;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="profile">
+      <img src="https://img.icons8.com/emoji/48/000000/student-emoji.png"/>
+      <div>
+        <div style="font-weight:600" id="studentName">--</div>
+        <div class="small-muted" id="studentUsername">@--</div>
+      </div>
+    </div>
+    <div>
+      <a class="btn secondary" href="student-dashboard.html">← Back to Dashboard</a>
+    </div>
+  </header>
+
+  <div class="container">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
+      <div>
+        <h1 style="color:#fff; margin: 0;">My Complaints</h1>
+        <p style="color:#fff; opacity:0.9; margin: 8px 0 0 0;">Track the status of your submitted complaints</p>
+      </div>
+      <a class="btn" href="complaint.html">+ Submit New Complaint</a>
+    </div>
+
+    <!-- Loading indicator -->
+    <div id="loadingIndicator" class="loading">
+      Loading your complaints...
+    </div>
+
+    <!-- Error message -->
+    <div id="errorMessage" style="display:none; color:#ff6b6b; text-align:center; padding:20px; background:#2c1810; border-radius:8px; margin:20px 0;">
+      Failed to load complaints. Please refresh the page.
+    </div>
+
+    <!-- No complaints message -->
+    <div id="noComplaints" class="no-complaints" style="display:none;">
+      <h3>No Complaints Submitted</h3>
+      <p>You haven't submitted any complaints yet.</p>
+      <a class="btn" href="complaint.html">Submit Your First Complaint</a>
+    </div>
+
+    <!-- Complaints list -->
+    <div id="complaintsContainer">
+      <!-- Complaints will be loaded here -->
+    </div>
+  </div>
+
+  <script>
+    function ensureStudent() {
+      const token = localStorage.getItem('studentToken');
+      const sStr = localStorage.getItem('studentData');
+      if (!token || !sStr) { 
+        window.location.href='student-login.html'; 
+        return null; 
+      }
+      try {
+        const s = JSON.parse(sStr);
+        document.getElementById('studentName').textContent = s.full_name || s.username;
+        document.getElementById('studentUsername').textContent = '@' + (s.username || '');
+        return s;
+      } catch { 
+        window.location.href='student-login.html'; 
+        return null; 
+      }
+    }
+
+    function formatDate(dateString) {
+      if (!dateString) return 'N/A';
+      const date = new Date(dateString);
+      
+      // Check if date is valid
+      if (isNaN(date.getTime())) return 'Invalid Date';
+      
+      // Use system locale and timezone
+      const options = {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true
+      };
+      
+      // This will use your system's timezone and locale settings
+      return date.toLocaleString(undefined, options);
+    }
+
+    function getStatusBadgeClass(status) {
+      switch(status) {
+        case 'open': return 'status-open';
+        case 'in_progress': return 'status-in_progress';
+        case 'resolved': return 'status-resolved';
+        default: return 'status-open';
+      }
+    }
+
+    function getStatusText(status) {
+      switch(status) {
+        case 'open': return 'Open';
+        case 'in_progress': return 'In Progress';
+        case 'resolved': return 'Resolved';
+        default: return 'Unknown';
+      }
+    }
+
+    function renderComplaint(complaint) {
+      return `
+        <div class="complaint-item">
+          <div class="complaint-header">
+            <span class="complaint-id">Complaint #${complaint.id}</span>
+            <span class="status-badge ${getStatusBadgeClass(complaint.status)}">
+              ${getStatusText(complaint.status)}
+            </span>
+          </div>
+          
+          <div class="complaint-subject">${complaint.subject}</div>
+          
+          <div class="complaint-description">${complaint.description}</div>
+          
+          <div class="complaint-dates">
+            <span><strong>Submitted:</strong> ${formatDate(complaint.created_at)}</span>
+            ${complaint.updated_at && complaint.updated_at !== complaint.created_at ? 
+              `<span><strong>Last Updated:</strong> ${formatDate(complaint.updated_at)}</span>` : ''}
+          </div>
+          
+          ${complaint.admin_response ? `
+            <div class="admin-response">
+              <h4>📝 Admin Response:</h4>
+              <div>${complaint.admin_response}</div>
+            </div>
+          ` : ''}
+        </div>
+      `;
+    }
+
+    async function loadComplaints() {
+      const student = ensureStudent();
+      if (!student) return;
+
+      try {
+        document.getElementById('loadingIndicator').style.display = 'block';
+        document.getElementById('errorMessage').style.display = 'none';
+        document.getElementById('noComplaints').style.display = 'none';
+
+        const response = await fetch(`/api/student/${student.id}/complaints`, {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${localStorage.getItem('studentToken')}`
+          }
+        });
+
+        document.getElementById('loadingIndicator').style.display = 'none';
+
+        if (response.ok) {
+          const complaints = await response.json();
+          const container = document.getElementById('complaintsContainer');
+          
+          if (complaints.length === 0) {
+            document.getElementById('noComplaints').style.display = 'block';
+            container.innerHTML = '';
+          } else {
+            document.getElementById('noComplaints').style.display = 'none';
+            container.innerHTML = complaints.map(renderComplaint).join('');
+          }
+        } else {
+          throw new Error(`Server responded with ${response.status}`);
+        }
+      } catch (error) {
+        console.error('Error loading complaints:', error);
+        document.getElementById('loadingIndicator').style.display = 'none';
+        document.getElementById('errorMessage').style.display = 'block';
+      }
+    }
+
+    window.addEventListener('load', () => {
+      const student = ensureStudent();
+      if (!student) return;
+      
+      loadComplaints();
+    });
+  </script>
+</body>
+</html>

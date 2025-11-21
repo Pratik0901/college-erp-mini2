@@ -21,21 +21,37 @@
   </header>
 
   <div class="container">
-    <h1 style="color:#fff">Submit Complaint</h1>
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
+      <h1 style="color:#fff; margin: 0;">Submit Complaint</h1>
+      <a class="btn secondary" href="my-complaints.html">View My Complaints</a>
+    </div>
     
     <div class="card" style="margin-top:24px;max-width:600px">
       <h3>File a Complaint</h3>
       <form id="complaintForm">
         <div class="form-group">
           <label>Subject</label>
-          <input type="text" id="subject" required>
+          <input type="text" id="subject" required placeholder="Brief description of your issue">
         </div>
         <div class="form-group">
           <label>Description</label>
-          <textarea id="description" required></textarea>
+          <textarea id="description" required placeholder="Provide detailed information about your complaint..." rows="6"></textarea>
         </div>
-        <button type="submit" class="btn">Submit Complaint</button>
+        <div style="display: flex; gap: 12px; margin-top: 20px;">
+          <button type="submit" class="btn">Submit Complaint</button>
+          <button type="button" class="btn secondary" onclick="window.location.href='student-dashboard.html'">Cancel</button>
+        </div>
       </form>
+    </div>
+
+    <div class="card" style="margin-top:24px;max-width:600px;background:#f8f9fa;">
+      <h4 style="color:#495057;">💡 Tips for Filing Complaints</h4>
+      <ul style="color:#6c757d;margin:12px 0;">
+        <li>Be specific and clear about the issue</li>
+        <li>Include relevant dates and details</li>
+        <li>Use professional and respectful language</li>
+        <li>You can track the status of your complaint after submission</li>
+      </ul>
     </div>
   </div>
 
@@ -56,24 +72,39 @@
       const s = ensureStudent(); if (!s) return;
       document.getElementById('complaintForm').addEventListener('submit', async (e) => {
         e.preventDefault();
+        
+        const submitBtn = e.target.querySelector('button[type="submit"]');
+        const originalText = submitBtn.textContent;
+        submitBtn.textContent = 'Submitting...';
+        submitBtn.disabled = true;
+
         const data = {
           user_id: s.id,
-          subject: document.getElementById('subject').value,
-          description: document.getElementById('description').value
+          subject: document.getElementById('subject').value.trim(),
+          description: document.getElementById('description').value.trim()
         };
+
         try {
           const res = await fetch('/api/student/complaint', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(data)
           });
+          
           if (res.ok) {
-            alert('Complaint submitted successfully!');
-            window.location.href = 'student-dashboard.html';
+            alert('Complaint submitted successfully! You can track its status in "My Complaints".');
+            window.location.href = 'my-complaints.html';
           } else {
-            alert('Failed to submit complaint');
+            const error = await res.json();
+            alert('Failed to submit complaint: ' + (error.error || 'Unknown error'));
           }
-        } catch { alert('Error submitting complaint'); }
+        } catch (error) {
+          console.error('Submit error:', error);
+          alert('Error submitting complaint. Please try again.');
+        } finally {
+          submitBtn.textContent = originalText;
+          submitBtn.disabled = false;
+        }
       });
     });
   </script>

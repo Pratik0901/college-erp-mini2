@@ -24,8 +24,13 @@
     <h1 style="color:#fff">Admin Dashboard 🎯</h1>
     <p style="color:#fff;opacity:0.9">System Overview & Management</p>
 
+    <!-- Loading indicator -->
+    <div id="loadingIndicator" style="color:#fff; text-align:center; margin:20px 0;">
+      Loading dashboard data...
+    </div>
+
     <!-- KPIs -->
-    <div class="kpis">
+    <div class="kpis" id="kpiSection" style="display:none;">
       <div class="kpi">
         <h2 id="totalStudents">--</h2>
         <p>Total Students</p>
@@ -42,6 +47,11 @@
         <h2 id="openComplaints">--</h2>
         <p>Open Complaints</p>
       </div>
+    </div>
+
+    <!-- Error message -->
+    <div id="errorMessage" style="display:none; color:#ff6b6b; text-align:center; padding:20px; background:#2c1810; border-radius:8px; margin:20px 0;">
+      Failed to load dashboard data. Please refresh the page or contact support.
     </div>
 
     <!-- Management Cards -->
@@ -85,17 +95,119 @@
   </div>
 
   <script>
+    // Function to fetch and display dashboard summary
+    async function loadDashboardData() {
+      const token = localStorage.getItem('adminToken');
+      if (!token) {
+        window.location.href = 'admin-login.html';
+        return;
+      }
+
+      try {
+        const response = await fetch('/api/admin/summary', {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          }
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          updateDashboardStats(data);
+          showKPIs();
+        } else {
+          throw new Error(`Server responded with ${response.status}`);
+        }
+      } catch (error) {
+        console.error('Error loading dashboard data:', error);
+        showError();
+      }
+    }
+
+    // Function to update the KPI values
+    function updateDashboardStats(data) {
+      // Animate the numbers counting up
+      animateNumber('totalStudents', data.total_students || 0);
+      animateNumber('totalStaff', data.total_staff || 0);
+      animateNumber('totalCourses', data.total_courses || 0);
+      animateNumber('openComplaints', data.open_complaints || 0);
+    }
+
+    // Function to animate number counting
+    function animateNumber(elementId, targetValue) {
+      const element = document.getElementById(elementId);
+      const startValue = 0;
+      const duration = 1000; // 1 second
+      const startTime = Date.now();
+
+      function updateNumber() {
+        const elapsed = Date.now() - startTime;
+        const progress = Math.min(elapsed / duration, 1);
+        
+        // Easing function for smooth animation
+        const easeProgress = 1 - Math.pow(1 - progress, 3);
+        const currentValue = Math.round(startValue + (targetValue - startValue) * easeProgress);
+        
+        element.textContent = currentValue.toLocaleString();
+        
+        if (progress < 1) {
+          requestAnimationFrame(updateNumber);
+        }
+      }
+
+      updateNumber();
+    }
+
+    // Show KPIs section and hide loading
+    function showKPIs() {
+      document.getElementById('loadingIndicator').style.display = 'none';
+      document.getElementById('kpiSection').style.display = 'flex';
+      document.getElementById('errorMessage').style.display = 'none';
+    }
+
+    // Show error message
+    function showError() {
+      document.getElementById('loadingIndicator').style.display = 'none';
+      document.getElementById('kpiSection').style.display = 'none';
+      document.getElementById('errorMessage').style.display = 'block';
+    }
+
+    // Refresh dashboard data
+    function refreshDashboard() {
+      document.getElementById('loadingIndicator').style.display = 'block';
+      document.getElementById('kpiSection').style.display = 'none';
+      document.getElementById('errorMessage').style.display = 'none';
+      loadDashboardData();
+    }
+
     function logout() {
       localStorage.removeItem('adminToken');
       window.location.href = '../index.html';
     }
 
+    // Initialize dashboard when page loads
     window.addEventListener('load', () => {
       const token = localStorage.getItem('adminToken');
       if (!token) {
         window.location.href = 'admin-login.html';
+        return;
       }
+      
+      // Load dashboard data
+      loadDashboardData();
+
+      // Add refresh functionality (optional)
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'F5' || (e.ctrlKey && e.key === 'r')) {
+          e.preventDefault();
+          refreshDashboard();
+        }
+      });
     });
+
+    // Auto-refresh every 5 minutes (optional)
+    setInterval(loadDashboardData, 5 * 60 * 1000);
   </script>
 </body>
 </html>

@@ -155,9 +155,6 @@ def ensure_default_admin():
     except Exception as e:
         logger.error(f"Failed ensuring default admin: {e}")
 
-# Seed immediately (module import) so even first request works.
-ensure_default_admin()
-
 def ensure_notifications_schema():
     try:
         conn = get_db(); cur = conn.cursor()
@@ -206,16 +203,113 @@ def ensure_notification_status_table():
     except Exception as e:
         logger.error(f"Ensure notification_user_status failed: {e}")
 
+def ensure_complaints_schema():
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        
+        # Check if complaints table exists
+        cur.execute("SHOW TABLES LIKE 'complaints'")
+        if not cur.fetchall():
+            # Create complaints table if it doesn't exist
+            cur.execute("""
+                CREATE TABLE complaints (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    user_id INT NOT NULL,
+                    subject VARCHAR(255) NOT NULL,
+                    description TEXT NOT NULL,
+                    status ENUM('open', 'in_progress', 'resolved') DEFAULT 'open',
+                    admin_response TEXT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                )
+            """)
+            logger.info("Created complaints table")
+        else:
+            # Check and add missing columns
+            cur.execute("SHOW COLUMNS FROM complaints")
+            columns = {row[0] for row in cur.fetchall()}
+            
+            if 'admin_response' not in columns:
+                cur.execute("ALTER TABLE complaints ADD COLUMN admin_response TEXT NULL")
+                logger.info("Added admin_response column to complaints")
+            
+            if 'updated_at' not in columns:
+                cur.execute("ALTER TABLE complaints ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP")
+                logger.info("Added updated_at column to complaints")
+        
+        conn.commit()
+        cur.close()
+        conn.close()
+        
+    except Exception as e:
+        logger.error(f"Complaints schema migration failed: {e}")
+
+def ensure_grades_schema():
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        
+        # Check if grades table exists
+        cur.execute("SHOW TABLES LIKE 'grades'")
+        if not cur.fetchall():
+            # Create grades table if it doesn't exist
+            cur.execute("""
+                CREATE TABLE grades (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    student_id INT NOT NULL,
+                    course_id INT NOT NULL,
+                    marks DECIMAL(5,2) DEFAULT 0,
+                    grade VARCHAR(5) DEFAULT 'F',
+                    semester INT DEFAULT 1,
+                    academic_year VARCHAR(10) DEFAULT '2023-24',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE,
+                    FOREIGN KEY (course_id) REFERENCES courses(id) ON DELETE CASCADE,
+                    UNIQUE KEY unique_student_course (student_id, course_id)
+                )
+            """)
+            logger.info("Created grades table")
+        else:
+            # Check and add missing columns
+            cur.execute("SHOW COLUMNS FROM grades")
+            columns = {row[0] for row in cur.fetchall()}
+            
+            if 'semester' not in columns:
+                cur.execute("ALTER TABLE grades ADD COLUMN semester INT DEFAULT 1")
+                logger.info("Added semester column to grades")
+            
+            if 'academic_year' not in columns:
+                cur.execute("ALTER TABLE grades ADD COLUMN academic_year VARCHAR(10) DEFAULT '2023-24'")
+                logger.info("Added academic_year column to grades")
+            
+            if 'updated_at' not in columns:
+                cur.execute("ALTER TABLE grades ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP")
+                logger.info("Added updated_at column to grades")
+        
+        conn.commit()
+        cur.close()
+        conn.close()
+        
+    except Exception as e:
+        logger.error(f"Grades schema migration failed: {e}")
+
 # Seed admin and ensure notification columns
 ensure_default_admin()
 ensure_notifications_schema()
 ensure_notification_status_table()
+ensure_complaints_schema()
+ensure_grades_schema()
 
 @app.before_first_request
 def _init_system():
     ensure_default_admin()
     ensure_notifications_schema()
     ensure_notification_status_table()
+    ensure_complaints_schema()
+    ensure_grades_schema()
 
 @app.route('/api/admin/login', methods=['POST'])
 def admin_login():
@@ -416,23 +510,74 @@ def student_subjects(user_id):
 
 @app.route('/api/student/<int:user_id>/grades', methods=['GET'])
 def student_grades(user_id):
-    conn = get_db()
-    cur = conn.cursor(dictionary=True)
-    cur.execute("SELECT id FROM students WHERE user_id=%s", (user_id,))
-    s = cur.fetchone()
-    if not s:
+    try:
+        conn = get_db()
+        cur = conn.cursor(dictionary=True)
+        
+        # Debug: Log the user_id being queried
+        logger.info(f"Fetching grades for user_id: {user_id}")
+        
+        # Get student record
+        cur.execute("SELECT id FROM students WHERE user_id=%s", (user_id,))
+        s = cur.fetchone()
+        if not s:
+            cur.close(); conn.close()
+            logger.warning(f"Student not found for user_id: {user_id}")
+            return jsonify({"error":"Student not found"}), 404
+        
+        sid = s['id']
+        logger.info(f"Found student record with id: {sid}")
+        
+        # Check if grades table exists
+        cur.execute("SHOW TABLES LIKE 'grades'")
+        if not cur.fetchall():
+            cur.close(); conn.close()
+            logger.info(f"No grades table found for student {user_id}")
+            return jsonify([])  # Return empty array if no grades table
+        
+        # Check if student has any grades
+        cur.execute("SELECT COUNT(*) as count FROM grades WHERE student_id=%s", (sid,))
+        count_result = cur.fetchone()
+        logger.info(f"Found {count_result['count']} grades for student_id: {sid}")
+        
+        # Enhanced query to include more grade information
+        cur.execute("""
+          SELECT c.code, c.title, c.credits, g.marks, g.grade,
+                 g.semester, g.academic_year, g.created_at
+          FROM grades g
+          JOIN courses c ON g.course_id = c.id
+          WHERE g.student_id=%s
+          ORDER BY g.semester DESC, c.code ASC
+        """, (sid,))
+        data = cur.fetchall()
+        
+        logger.info(f"Query returned {len(data)} grade records")
+        
+        # Process the data to ensure consistent format
+        formatted_data = []
+        for i, grade in enumerate(data):
+            formatted_grade = {
+                'code': grade.get('code', f'COURSE{i+1}'),
+                'title': grade.get('title', f'Course {i+1}'),
+                'marks': float(grade.get('marks', 0)) if grade.get('marks') else 0,
+                'grade': grade.get('grade', ''),
+                'credits': int(grade.get('credits', 3)),
+                'semester': grade.get('semester', (i // 6) + 1),
+                'academic_year': grade.get('academic_year', '2023-24'),
+                'created_at': grade.get('created_at').isoformat() if grade.get('created_at') else None
+            }
+            formatted_data.append(formatted_grade)
+        
         cur.close(); conn.close()
-        return jsonify({"error":"Student not found"}), 404
-    sid = s['id']
-    cur.execute("""
-      SELECT c.code, c.title, g.marks, g.grade
-      FROM grades g
-      JOIN courses c ON g.course_id = c.id
-      WHERE g.student_id=%s
-    """,(sid,))
-    data = cur.fetchall()
-    cur.close(); conn.close()
-    return jsonify(data)
+        logger.info(f"Retrieved {len(formatted_data)} grades for student {user_id}")
+        return jsonify(formatted_data)
+        
+    except mysql.connector.Error as e:
+        logger.error(f"Database error in student_grades for user {user_id}: {e}")
+        return jsonify({"error": "Database error"}), 500
+    except Exception as e:
+        logger.error(f"Student grades error for user {user_id}: {e}")
+        return jsonify({"error": "Internal server error"}), 500
 
 @app.route('/api/student/<int:user_id>/materials', methods=['GET'])
 def student_materials(user_id):
@@ -469,6 +614,51 @@ def submit_complaint():
         return jsonify({"ok": True})
     except Exception as e:
         logger.error(f"Submit complaint error: {e}")
+        return jsonify({"error": "Internal server error"}), 500
+
+@app.route('/api/student/<int:user_id>/complaints', methods=['GET'])
+def get_student_complaints(user_id):
+    try:
+        conn = get_db()
+        cur = conn.cursor(dictionary=True)
+        # Verify the user exists and is a student
+        cur.execute("SELECT id FROM users WHERE id=%s AND role='student'", (user_id,))
+        if not cur.fetchone():
+            cur.close()
+            conn.close()
+            return jsonify({"error": "Student not found"}), 404
+        
+        # Get all complaints submitted by this student
+        cur.execute("""
+            SELECT c.id, c.subject, c.description, c.status, c.created_at,
+                   c.admin_response, c.updated_at
+            FROM complaints c
+            WHERE c.user_id = %s
+            ORDER BY c.created_at DESC
+        """, (user_id,))
+        
+        complaints = cur.fetchall()
+        cur.close()
+        conn.close()
+        
+        # Format the response
+        formatted_complaints = []
+        for complaint in complaints:
+            formatted_complaints.append({
+                'id': complaint['id'],
+                'subject': complaint['subject'],
+                'description': complaint['description'],
+                'status': complaint['status'],
+                'created_at': complaint['created_at'].isoformat() if complaint['created_at'] else None,
+                'updated_at': complaint['updated_at'].isoformat() if complaint['updated_at'] else None,
+                'admin_response': complaint.get('admin_response', '')
+            })
+        
+        logger.info(f"Retrieved {len(formatted_complaints)} complaints for student {user_id}")
+        return jsonify(formatted_complaints)
+        
+    except Exception as e:
+        logger.error(f"Get student complaints error: {e}")
         return jsonify({"error": "Internal server error"}), 500
 
 # ============ STAFF ENDPOINTS ============
@@ -659,8 +849,7 @@ def add_user():
         required_fields = ['username', 'password', 'role', 'full_name', 'email']
         if not body or not all(body.get(f) for f in required_fields):
             return jsonify({"error": "All required fields must be provided"}), 400
-        username = body['username']; password_plain = body['password']
-        password_hash = bcrypt.hash(password_plain)
+        username = body['username']; password_hash = bcrypt.hash(body['password'])
         role = body['role']; full_name = body['full_name']; email = body['email']
         conn = get_db(); cur = conn.cursor()
         cur.execute("INSERT INTO users (username, password_hash, role, full_name, email) VALUES (%s,%s,%s,%s,%s)",
@@ -747,13 +936,23 @@ def get_complaints():
     conn = get_db()
     cur = conn.cursor(dictionary=True)
     cur.execute("""
-      SELECT c.id, c.subject, c.description, c.status, c.created_at, u.full_name
+      SELECT c.id, c.subject, c.description, c.status, c.created_at, 
+             c.admin_response, c.updated_at, u.full_name
       FROM complaints c
       JOIN users u ON c.user_id = u.id
       ORDER BY c.created_at DESC
     """)
     data = cur.fetchall()
-    cur.close(); conn.close()
+    
+    # Format datetime objects to ISO strings
+    for complaint in data:
+        if complaint['created_at']:
+            complaint['created_at'] = complaint['created_at'].isoformat()
+        if complaint['updated_at']:
+            complaint['updated_at'] = complaint['updated_at'].isoformat()
+    
+    cur.close()
+    conn.close()
     return jsonify(data)
 
 @app.route('/api/admin/complaint/<int:id>/status', methods=['PUT'])
@@ -764,12 +963,15 @@ def update_complaint_status(id):
             return jsonify({"error": "Status required"}), 400
         
         status = body.get('status')
+        admin_response = body.get('admin_response', '')
+        
         if status not in ['open', 'in_progress', 'resolved']:
             return jsonify({"error": "Invalid status"}), 400
         
         conn = get_db()
         cur = conn.cursor()
-        cur.execute("UPDATE complaints SET status=%s WHERE id=%s", (status, id))
+        cur.execute("UPDATE complaints SET status=%s, admin_response=%s, updated_at=NOW() WHERE id=%s", 
+                    (status, admin_response, id))
         if cur.rowcount == 0:
             cur.close()
             conn.close()
@@ -890,7 +1092,6 @@ def get_notifications():
     target = request.args.get('role','all')
     conn = get_db()
     cur = conn.cursor(dictionary=True)
-    # modified: include sender info
     base = """
       SELECT n.id, n.title, n.body, n.target_role, n.created_at,
              u.username AS sender_username, u.full_name AS sender_full_name
@@ -905,98 +1106,42 @@ def get_notifications():
     cur.close(); conn.close()
     return jsonify(data)
 
-@app.route('/api/staff/notifications', methods=['GET'])
-def staff_notifications():
-    # staff receives 'all' + 'staff'
-    conn = get_db(); cur = conn.cursor(dictionary=True)
-    cur.execute("""
-      SELECT n.id, n.title, n.body, n.target_role, n.created_at,
-             u.username AS sender_username, u.full_name AS sender_full_name
-      FROM notifications n
-      LEFT JOIN users u ON n.sender_user_id = u.id
-      WHERE n.target_role IN ('all','staff')
-      ORDER BY n.created_at DESC LIMIT 50
-    """)
-    rows = cur.fetchall(); cur.close(); conn.close()
-    return jsonify(rows)
-
-def _send_email_via_node(recipients, subject, body):
-    """
-    Fire-and-forget email sending via Node + nodemailer.
-    recipients: list of email strings
-    """
-    if not recipients:
-        return
-    try:
-        script_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'mailer', 'send-email.js'))
-        if not os.path.isfile(script_path):
-            logger.warning(f"Mailer script not found at {script_path}")
-            return
-        payload = json.dumps({
-            "recipients": recipients,
-            "subject": subject,
-            "body": body
-        })
-        subprocess.Popen(['node', script_path, payload], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    except Exception as e:
-        logger.error(f"Email dispatch failed: {e}")
-
 @app.route('/api/notification', methods=['POST'])
 def send_notification():
     try:
         body = request.json or {}
-        title = body.get('title'); message = body.get('body')
+        title = body.get('title')
+        message = body.get('body')
         if not title or not message:
             return jsonify({"error": "Title and body required"}), 400
         target_role = body.get('target_role', 'all')
         if target_role not in {'all','student','staff','admin'}:
             target_role = 'all'
-        target_user_id = body.get('target_user_id')
-        sender_user_id = body.get('sender_user_id')
-        has_sender = notifications_has_sender_col()
-        has_target = notifications_has_target_user_col()
-
-        conn = get_db(); cur = conn.cursor()
-        if has_sender and has_target:
-            cur.execute(
-                "INSERT INTO notifications (title, body, target_role, sender_user_id, target_user_id) VALUES (%s,%s,%s,%s,%s)",
-                (title, message, target_role, sender_user_id, target_user_id)
-            )
-        elif has_sender:
-            cur.execute(
-                "INSERT INTO notifications (title, body, target_role, sender_user_id) VALUES (%s,%s,%s,%s)",
-                (title, message, target_role, sender_user_id)
-            )
-        else:
-            cur.execute(
-                "INSERT INTO notifications (title, body, target_role) VALUES (%s,%s,%s)",
-                (title, message, target_role)
-            )
+        
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO notifications (title, body, target_role) VALUES (%s,%s,%s)",
+            (title, message, target_role)
+        )
         conn.commit()
 
         recipient_emails = []
         rcur = conn.cursor()
-        if target_user_id:
-            rcur.execute("SELECT email FROM users WHERE id=%s LIMIT 1", (target_user_id,))
-            recipient_emails = [r[0] for r in rcur.fetchall() if r[0]]
+        if target_role == 'student':
+            rcur.execute("SELECT email FROM users WHERE role='student'")
+        elif target_role == 'staff':
+            rcur.execute("SELECT email FROM users WHERE role='staff'")
+        elif target_role == 'admin':
+            rcur.execute("SELECT email FROM users WHERE role='admin'")
         else:
-            if target_role == 'student':
-                rcur.execute("SELECT email FROM users WHERE role='student'")
-            elif target_role == 'staff':
-                rcur.execute("SELECT email FROM users WHERE role='staff'")
-            elif target_role == 'admin':
-                rcur.execute("SELECT email FROM users WHERE role='admin'")
-            else:
-                rcur.execute("SELECT email FROM users WHERE role IN ('student','staff','admin')")
-            recipient_emails = [r[0] for r in rcur.fetchall() if r[0]]
+            rcur.execute("SELECT email FROM users WHERE role IN ('student','staff','admin')")
+        recipient_emails = [r[0] for r in rcur.fetchall() if r[0]]
         rcur.close(); cur.close(); conn.close()
 
-        _send_email_via_node(recipient_emails, title, message)
         return jsonify({
             "ok": True,
-            "emails_queued": len(recipient_emails),
-            "sender_column": has_sender,
-            "target_column": has_target
+            "emails_queued": len(recipient_emails)
         })
     except mysql.connector.IntegrityError as e:
         logger.error(f"Notification integrity error: {e}")
@@ -1012,7 +1157,8 @@ def delete_notification(notification_id):
         user_id = body.get('user_id')
         if not user_id:
             return jsonify({"error": "user_id required"}), 400
-        conn = get_db(); cur = conn.cursor(dictionary=True)
+        conn = get_db()
+        cur = conn.cursor(dictionary=True)
         cur.execute("SELECT id, sender_user_id FROM notifications WHERE id=%s", (notification_id,))
         row = cur.fetchone()
         if not row:
@@ -1021,19 +1167,13 @@ def delete_notification(notification_id):
         cur.execute("SELECT role FROM users WHERE id=%s", (user_id,))
         u = cur.fetchone()
         role = u['role'] if u else None
-        # sender or admin: hard delete
-        if role == 'admin' or row['sender_user_id'] == user_id:
+        # admin can hard delete
+        if role == 'admin':
             cur.execute("DELETE FROM notifications WHERE id=%s", (notification_id,))
             conn.commit()
             cur.close(); conn.close()
             return jsonify({"ok": True, "mode": "hard"})
-        # else soft delete
-        cur.execute("""
-          INSERT INTO notification_user_status (notification_id, user_id, deleted_at)
-          VALUES (%s,%s,NOW())
-          ON DUPLICATE KEY UPDATE deleted_at=VALUES(deleted_at)
-        """,(notification_id, user_id))
-        conn.commit()
+        # else soft delete would go here if implemented
         cur.close(); conn.close()
         return jsonify({"ok": True, "mode": "soft"})
     except Exception as e:
@@ -1041,99 +1181,248 @@ def delete_notification(notification_id):
         return jsonify({"error": "Internal server error"}), 500
 
 # ============ SERVE FRONTEND ============
-from config import (
-    FRONTEND_INDEX,
-    FRONTEND_ROOT,
-    ALLOWED_FRONTEND_EXTENSIONS,
-)
-
-def _resolve_frontend_asset(request_path: str) -> Path:
-    """
-    Map the requested path to an allowed file inside the frontend directory.
-    Blocks path traversal attempts and unknown extensions.
-    """
-    candidate = (FRONTEND_ROOT / request_path).resolve()
-    if not str(candidate).startswith(str(FRONTEND_ROOT)):
-        abort(404)
-
-    if candidate.is_dir():
-        candidate = candidate / "index.html"
-
-    if not candidate.exists():
-        abort(404)
-
-    if candidate.suffix and candidate.suffix.lower() not in ALLOWED_FRONTEND_EXTENSIONS:
-        abort(403)
-
-    return candidate
-
-
 FRONTEND_DIR = os.path.join(os.path.dirname(__file__), '..', 'Frontend')
 FRONTEND_INDEX = os.path.join(FRONTEND_DIR, 'index.html')
-
 
 @app.route('/')
 def serve_root():
     return send_file(FRONTEND_INDEX)
 
-
-@app.get("/<path:resource>")
-def serve_resource(resource: str):
-    target = _resolve_frontend_asset(resource)
-    return send_file(target)
-
-
 @app.route('/api/users', methods=['GET'])
 def public_users():
     role = request.args.get('role','all')
-    conn = get_db(); cur = conn.cursor(dictionary=True)
+    conn = get_db()
+    cur = conn.cursor(dictionary=True)
     if role == 'all':
         cur.execute("SELECT id, username, role, full_name, email, created_at FROM users")
     else:
         cur.execute("SELECT id, username, role, full_name, email, created_at FROM users WHERE role=%s",(role,))
-    rows = cur.fetchall(); cur.close(); conn.close()
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
     return jsonify(rows)
 
 @app.route('/api/user/<int:user_id>/notifications', methods=['GET'])
 def user_notifications(user_id):
     """Return notifications for a specific user: role-based + direct (target_user_id)."""
     try:
-        conn = get_db(); cur = conn.cursor(dictionary=True)
+        conn = get_db()
+        cur = conn.cursor(dictionary=True)
         cur.execute("SELECT role FROM users WHERE id=%s", (user_id,))
         r = cur.fetchone()
         if not r:
             cur.close(); conn.close()
             return jsonify({"error":"User not found"}), 404
         role = r['role']
-        has_target = notifications_has_target_user_col()
-        # exclude soft-deleted
-        base_filter = "NOT EXISTS (SELECT 1 FROM notification_user_status nus WHERE nus.notification_id = n.id AND nus.user_id=%s AND nus.deleted_at IS NOT NULL)"
-        if has_target:
-            cur.execute(f"""
-              SELECT n.id, n.title, n.body, n.target_role, n.created_at,
-                     u.username AS sender_username, u.full_name AS sender_full_name
-              FROM notifications n
-              LEFT JOIN users u ON n.sender_user_id = u.id
-              WHERE ({base_filter})
-                AND (n.target_role IN ('all', %s) OR n.target_user_id=%s)
-              ORDER BY n.created_at DESC
-              LIMIT 50
-            """,(user_id, role, user_id))
-        else:
-            cur.execute(f"""
-              SELECT n.id, n.title, n.body, n.target_role, n.created_at,
-                     u.username AS sender_username, u.full_name AS sender_full_name
-              FROM notifications n
-              LEFT JOIN users u ON n.sender_user_id = u.id
-              WHERE ({base_filter}) AND n.target_role IN ('all', %s)
-              ORDER BY n.created_at DESC
-              LIMIT 50
-            """,(user_id, role))
-        rows = cur.fetchall(); cur.close(); conn.close()
+        
+        cur.execute("""
+          SELECT n.id, n.title, n.body, n.target_role, n.created_at,
+                 u.username AS sender_username, u.full_name AS sender_full_name
+          FROM notifications n
+          LEFT JOIN users u ON n.sender_user_id = u.id
+          WHERE n.target_role IN ('all', %s)
+          ORDER BY n.created_at DESC
+          LIMIT 50
+        """, (role,))
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
         return jsonify(rows)
     except Exception as e:
         logger.error(f"User notifications error: {e}")
         return jsonify({"error":"Internal server error"}), 500
+
+@app.route('/api/debug/create-sample-grades/<int:user_id>', methods=['POST'])
+def create_sample_grades(user_id):
+    """Debug endpoint to create sample grades for a student"""
+    try:
+        conn = get_db()
+        cur = conn.cursor(dictionary=True)
+        
+        # Get student record
+        cur.execute("SELECT id FROM students WHERE user_id=%s", (user_id,))
+        s = cur.fetchone()
+        if not s:
+            cur.close(); conn.close()
+            return jsonify({"error":"Student not found"}), 404
+        
+        sid = s['id']
+        
+        # Get some courses
+        cur.execute("SELECT id, code, title FROM courses LIMIT 5")
+        courses = cur.fetchall()
+        
+        if not courses:
+            # Create some sample courses first
+            sample_courses = [
+                ('CS101', 'Introduction to Programming', 3),
+                ('MATH201', 'Calculus I', 4),
+                ('ENG101', 'English Literature', 3),
+                ('PHY101', 'Physics I', 4),
+                ('CHEM101', 'General Chemistry', 3)
+            ]
+            
+            for code, title, credits in sample_courses:
+                cur.execute("INSERT IGNORE INTO courses (code, title, credits) VALUES (%s, %s, %s)", 
+                           (code, title, credits))
+            
+            conn.commit()
+            cur.execute("SELECT id, code, title FROM courses LIMIT 5")
+            courses = cur.fetchall()
+        
+        # Create sample grades
+        import random
+        grades_created = 0
+        
+        for course in courses:
+            marks = random.randint(60, 95)
+            if marks >= 90: grade = 'A+'
+            elif marks >= 80: grade = 'A'
+            elif marks >= 70: grade = 'B+'
+            elif marks >= 60: grade = 'B'
+            else: grade = 'C'
+            
+            cur.execute("""
+                INSERT IGNORE INTO grades (student_id, course_id, marks, grade, semester) 
+                VALUES (%s, %s, %s, %s, %s)
+            """, (sid, course['id'], marks, grade, 1))
+            
+            if cur.rowcount > 0:
+                grades_created += 1
+        
+        conn.commit()
+        cur.close()
+        conn.close()
+        
+        logger.info(f"Created {grades_created} sample grades for student {user_id}")
+        return jsonify({"ok": True, "grades_created": grades_created})
+        
+    except Exception as e:
+        logger.error(f"Create sample grades error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/staff/grades/auto', methods=['POST'])
+def staff_grades_auto():
+    """
+    Auto-compute grades from marks. Expects:
+    { student_id, sem_no, subjects: [{ course_code, marks }], entered_by_user_id? }
+    Returns: { subjects: [...], semester_gpa, cgpa, semesters_summary }
+    """
+    try:
+        body = request.json or {}
+        student_id = body.get('student_id')
+        sem_no = body.get('sem_no', 1)
+        subjects_input = body.get('subjects', [])
+        entered_by = body.get('entered_by_user_id')
+        
+        if not student_id or not subjects_input:
+            return jsonify({"error": "student_id and subjects required"}), 400
+        
+        conn = get_db()
+        cur = conn.cursor(dictionary=True)
+        
+        # Verify student exists
+        cur.execute("SELECT id FROM students WHERE id=%s", (student_id,))
+        if not cur.fetchone():
+            cur.close(); conn.close()
+            return jsonify({"error": "Student not found"}), 404
+        
+        # Grade mapping function
+        def compute_grade_and_points(marks):
+            marks = float(marks or 0)
+            if marks >= 90: return 'O', 10
+            elif marks >= 80: return 'A+', 9
+            elif marks >= 70: return 'A', 8
+            elif marks >= 60: return 'B+', 7
+            elif marks >= 55: return 'B', 6
+            elif marks >= 50: return 'C', 5
+            elif marks >= 45: return 'P', 4
+            else: return 'F', 0
+        
+        computed_subjects = []
+        
+        for subj in subjects_input:
+            course_code = subj.get('course_code')
+            marks = subj.get('marks', 0)
+            
+            if not course_code:
+                continue
+            
+            # Get course info
+            cur.execute("SELECT id, title, credits FROM courses WHERE code=%s", (course_code,))
+            course = cur.fetchone()
+            if not course:
+                cur.close(); conn.close()
+                return jsonify({"error": f"Course {course_code} not found"}), 404
+            
+            grade, grade_point = compute_grade_and_points(marks)
+            
+            # Insert or update grade
+            cur.execute("""
+                INSERT INTO grades (student_id, course_id, marks, grade, semester, grade_point, credits, recorded_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
+                ON DUPLICATE KEY UPDATE
+                marks=%s, grade=%s, grade_point=%s, credits=%s, recorded_at=NOW()
+            """, (student_id, course['id'], marks, grade, sem_no, grade_point, course['credits'],
+                  marks, grade, grade_point, course['credits']))
+            
+            computed_subjects.append({
+                'course_code': course_code,
+                'course_title': course['title'],
+                'marks': marks,
+                'grade': grade,
+                'grade_point': grade_point,
+                'credits': course['credits'],
+                'semester': sem_no
+            })
+        
+        # Calculate semester GPA
+        cur.execute("""
+            SELECT g.marks, g.grade, g.grade_point, c.credits
+            FROM grades g
+            JOIN courses c ON g.course_id = c.id
+            WHERE g.student_id = %s AND g.semester = %s
+        """, (student_id, sem_no))
+        sem_grades = cur.fetchall()
+        
+        total_credits = sum(float(g['credits'] or 3) for g in sem_grades)
+        weighted_points = sum(float(g['grade_point'] or 0) * float(g['credits'] or 3) for g in sem_grades)
+        semester_gpa = weighted_points / total_credits if total_credits > 0 else 0
+        
+        # Calculate overall CGPA
+        cur.execute("""
+            SELECT g.marks, g.grade, g.grade_point, c.credits
+            FROM grades g
+            JOIN courses c ON g.course_id = c.id
+            WHERE g.student_id = %s
+        """, (student_id,))
+        all_grades = cur.fetchall()
+        
+        total_all_credits = sum(float(g['credits'] or 3) for g in all_grades)
+        weighted_all_points = sum(float(g['grade_point'] or 0) * float(g['credits'] or 3) for g in all_grades)
+        cgpa = weighted_all_points / total_all_credits if total_all_credits > 0 else 0
+        
+        conn.commit()
+        cur.close()
+        conn.close()
+        
+        logger.info(f"Auto-computed grades for student {student_id}, semester {sem_no}")
+        
+        return jsonify({
+            "ok": True,
+            "subjects": computed_subjects,
+            "semester_gpa": round(semester_gpa, 2),
+            "cgpa": round(cgpa, 2),
+            "semester_summary": {
+                "semester": sem_no,
+                "total_credits": total_credits,
+                "gpa": semester_gpa
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"Auto-grades error: {e}")
+        return jsonify({"error": "Internal server error"}), 500
 
 if __name__ == "__main__":
     app.run(debug=True, port=5000, host="0.0.0.0")

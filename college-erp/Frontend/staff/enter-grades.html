@@ -38,21 +38,23 @@
           </select>
         </div>
         <div class="form-group">
+          <label>Semester</label>
+          <select id="semesterInput" required>
+            <option value="1">Semester 1</option>
+            <option value="2">Semester 2</option>
+            <option value="3">Semester 3</option>
+            <option value="4">Semester 4</option>
+            <option value="5">Semester 5</option>
+            <option value="6">Semester 6</option>
+            <option value="7">Semester 7</option>
+            <option value="8">Semester 8</option>
+          </select>
+        </div>
+        <div class="form-group">
           <label>Marks (out of 100)</label>
           <input type="number" id="marks" min="0" max="100" required>
         </div>
-        <div class="form-group">
-          <label>Grade</label>
-          <select id="grade" required>
-            <option value="A">A (90-100)</option>
-            <option value="B+">B+ (80-89)</option>
-            <option value="B">B (70-79)</option>
-            <option value="C">C (60-69)</option>
-            <option value="D">D (50-59)</option>
-            <option value="F">F (Below 50)</option>
-          </select>
-        </div>
-        <button type="submit" class="btn">Submit Grade</button>
+        <button type="submit" class="btn">Submit Grade (Auto-Computed)</button>
       </form>
     </div>
   </div>
@@ -104,34 +106,56 @@
         '<option value="">-- Select Student --</option>' +
         students.map(s => `<option value="${s.id}">${s.roll_no} - ${s.full_name}</option>`).join('');
       
+      // Store course code in option value for easier auto-grading
       document.getElementById('courseSelect').innerHTML = 
         '<option value="">-- Select Course --</option>' +
-        courses.map(c => `<option value="${c.id}">${c.code} - ${c.title}</option>`).join('');
+        courses.map(c => `<option value="${c.code}">${c.code} - ${c.title}</option>`).join('');
     }
     
     document.getElementById('gradesForm').addEventListener('submit', async (e) => {
       e.preventDefault();
-      
-      const data = {
-        student_id: parseInt(document.getElementById('studentSelect').value),
-        course_id: parseInt(document.getElementById('courseSelect').value),
-        marks: parseFloat(document.getElementById('marks').value),
-        grade: document.getElementById('grade').value
+      const ctx = ensureStaff();
+      if (!ctx) return;
+
+      const studentId = parseInt(document.getElementById('studentSelect').value);
+      const courseCode = document.getElementById('courseSelect').value;
+      const marks = parseFloat(document.getElementById('marks').value);
+      const semNo = parseInt(document.getElementById('semesterInput').value);
+
+      if (!courseCode) {
+        alert('Please select a course');
+        return;
+      }
+
+      const payload = {
+        student_id: studentId,
+        sem_no: semNo,
+        subjects: [
+          { course_code: courseCode, marks: marks }
+        ],
+        entered_by_user_id: ctx.staff.id
       };
-      
+
       try {
-        const res = await fetch('/api/staff/grades', {
+        const res = await fetch('/api/staff/grades/auto', {
           method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify(data)
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
         });
         
-        if (res.ok) {
-          alert('Grade entered successfully!');
-          e.target.reset();
+        const j = await res.json();
+        if (!res.ok) {
+          alert('Error: ' + (j.error || 'Failed to save'));
+          return;
         }
-      } catch (e) {
-        alert('Error entering grade');
+        
+        const semesterGPA = j.semester_gpa !== undefined ? j.semester_gpa.toFixed(2) : 'N/A';
+        const grade = j.subjects && j.subjects[0] ? j.subjects[0].grade : 'N/A';
+        alert(`Grade computed & saved!\nGrade: ${grade}\nSemester GPA: ${semesterGPA}`);
+        e.target.reset();
+      } catch (err) {
+        console.error(err);
+        alert('Network or server error');
       }
     });
     
