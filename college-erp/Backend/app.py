@@ -1,5 +1,9 @@
 from flask import Flask, request, jsonify, send_from_directory, abort, send_file
+from flask_sqlalchemy import SQLAlchemy
 from flask_cors import CORS
+from functools import wraps
+from datetime import datetime, timedelta
+import jwt
 import mysql.connector
 from passlib.hash import bcrypt
 from werkzeug.utils import secure_filename
@@ -7,9 +11,11 @@ import os
 import logging
 from pathlib import Path
 import time
-import subprocess, json
 
 app = Flask(__name__, static_folder="../Frontend", static_url_path="/")
+app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+mysqlconnector://root:@127.0.0.1/college_erp'
+app.config['SECRET_KEY'] = 'your_secret_key'  # Change this to a strong secret key
+db = SQLAlchemy(app)
 CORS(app)
 
 # Configure logging
@@ -30,66 +36,59 @@ def get_db():
         logger.error(f"Database connection failed: {e}")
         raise
 
-# Detect if students table has auth columns (username, password_hash)
-_STUDENTS_HAS_AUTH_COLS = None
-def students_has_auth_cols() -> bool:
-    global _STUDENTS_HAS_AUTH_COLS
-    if _STUDENTS_HAS_AUTH_COLS is not None:
-        return _STUDENTS_HAS_AUTH_COLS
-    try:
-        conn = get_db(); cur = conn.cursor()
-        cur.execute("""
-            SELECT COLUMN_NAME
-            FROM INFORMATION_SCHEMA.COLUMNS
-            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'students'
-        """)
-        cols = {row[0] for row in cur.fetchall()}
-        _STUDENTS_HAS_AUTH_COLS = {'username', 'password_hash'}.issubset(cols)
-        cur.close(); conn.close()
-    except Exception as e:
-        logger.warning(f"Failed to inspect students columns: {e}")
-        _STUDENTS_HAS_AUTH_COLS = False
-    return _STUDENTS_HAS_AUTH_COLS
+# Token required decorator
+def token_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        token = None
+        if 'Authorization' in request.headers:
+            auth_header = request.headers['Authorization']
+            try:
+                token = auth_header.split(" ")[1]
+            except IndexError:
+                return jsonify({'error': 'Invalid token format'}), 401
+        
+        if not token:
+            return jsonify({'error': 'Token is missing'}), 401
+        
+        try:
+            data = jwt.decode(token, app.config['SECRET_KEY'], algorithms=['HS256'])
+            current_user = User.query.get(data['user_id'])
+            if not current_user:
+                return jsonify({'error': 'User not found'}), 404
+        except jwt.ExpiredSignatureError:
+            return jsonify({'error': 'Token has expired'}), 401
+        except jwt.InvalidTokenError:
+            return jsonify({'error': 'Invalid token'}), 401
+        
+        return f(current_user, *args, **kwargs)
+    
+    return decorated
 
-_NOTIFICATIONS_HAS_SENDER_COL = None
-def notifications_has_sender_col() -> bool:
-    global _NOTIFICATIONS_HAS_SENDER_COL
-    if _NOTIFICATIONS_HAS_SENDER_COL is not None:
-        return _NOTIFICATIONS_HAS_SENDER_COL
-    try:
-        conn = get_db(); cur = conn.cursor()
-        cur.execute("""
-          SELECT COLUMN_NAME
-          FROM INFORMATION_SCHEMA.COLUMNS
-          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME='notifications'
-        """)
-        cols = {r[0] for r in cur.fetchall()}
-        _NOTIFICATIONS_HAS_SENDER_COL = 'sender_user_id' in cols
-        cur.close(); conn.close()
-    except Exception as e:
-        logger.warning(f"Inspect notifications cols failed: {e}")
-        _NOTIFICATIONS_HAS_SENDER_COL = False
-    return _NOTIFICATIONS_HAS_SENDER_COL
+# Add User model definition if it doesn't exist
+class User(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(80), unique=True, nullable=False)
+    email = db.Column(db.String(120), unique=True, nullable=False)
+    full_name = db.Column(db.String(200))
+    password_hash = db.Column(db.String(255))
+    role = db.Column(db.String(50), default='student')
+    phone = db.Column(db.String(20))
+    gender = db.Column(db.String(20))
+    dob = db.Column(db.Date)
+    enrollment_number = db.Column(db.String(50))
+    roll_number = db.Column(db.String(50))
+    course = db.Column(db.String(100))
+    semester = db.Column(db.String(20))
+    address = db.Column(db.Text)
+    city = db.Column(db.String(100))
+    state = db.Column(db.String(100))
+    postal_code = db.Column(db.String(20))
+    country = db.Column(db.String(100))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-_NOTIFICATIONS_HAS_TARGET_USER_COL = None
-def notifications_has_target_user_col() -> bool:
-    global _NOTIFICATIONS_HAS_TARGET_USER_COL
-    if _NOTIFICATIONS_HAS_TARGET_USER_COL is not None:
-        return _NOTIFICATIONS_HAS_TARGET_USER_COL
-    try:
-        conn = get_db(); cur = conn.cursor()
-        cur.execute("""
-          SELECT COLUMN_NAME
-          FROM INFORMATION_SCHEMA.COLUMNS
-          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME='notifications'
-        """)
-        cols = {r[0] for r in cur.fetchall()}
-        _NOTIFICATIONS_HAS_TARGET_USER_COL = 'target_user_id' in cols
-        cur.close(); conn.close()
-    except Exception as e:
-        logger.warning(f"Inspect notifications target col failed: {e}")
-        _NOTIFICATIONS_HAS_TARGET_USER_COL = False
-    return _NOTIFICATIONS_HAS_TARGET_USER_COL
+    def __repr__(self):
+        return f'<User {self.username}>'
 
 # ============ AUTHENTICATION ============
 @app.route('/api/login', methods=['POST'])
@@ -107,14 +106,16 @@ def login():
         user = cur.fetchone()
         cur.close()
         conn.close()
+        
         if not user:
             logger.warning(f"Login attempt with invalid username: {username}")
             return jsonify({"error": "Invalid credentials"}), 401
-        stored = user['password_hash']
-        if bcrypt.verify(password, stored):
+        
+        if bcrypt.verify(password, user['password_hash']):
             user.pop('password_hash', None)
             logger.info(f"User {username} logged in successfully")
             return jsonify({"success": True, "user": user})
+        
         logger.warning(f"Login attempt with invalid password for username: {username}")
         return jsonify({"error": "Invalid credentials"}), 401
     except Exception as e:
@@ -138,6 +139,7 @@ def ensure_default_admin():
             ph = row['password_hash'] or ''
             if not (ph.startswith('$2') and len(ph) >= 60):
                 needs_update = True
+        
         if needs_update:
             pw_hash = bcrypt.hash(ADMIN_PASSWORD_PLAIN)
             if row:
@@ -155,166 +157,13 @@ def ensure_default_admin():
     except Exception as e:
         logger.error(f"Failed ensuring default admin: {e}")
 
-def ensure_notifications_schema():
-    try:
-        conn = get_db(); cur = conn.cursor()
-        cur.execute("SHOW TABLES LIKE 'notifications'")
-        if not cur.fetchall():
-            cur.close(); conn.close()
-            logger.warning("notifications table missing; skip migration")
-            return
-        cur.execute("SHOW COLUMNS FROM notifications")
-        cols = {r[0] for r in cur.fetchall()}
-        # sender_user_id
-        if 'sender_user_id' not in cols:
-            logger.info("Adding sender_user_id to notifications")
-            cur.execute("ALTER TABLE notifications ADD COLUMN sender_user_id INT NULL")
-            cur.execute("""ALTER TABLE notifications
-                           ADD CONSTRAINT fk_notifications_sender
-                           FOREIGN KEY (sender_user_id) REFERENCES users(id) ON DELETE SET NULL""")
-        # target_user_id
-        if 'target_user_id' not in cols:
-            logger.info("Adding target_user_id to notifications")
-            cur.execute("ALTER TABLE notifications ADD COLUMN target_user_id INT NULL")
-            cur.execute("""ALTER TABLE notifications
-                           ADD CONSTRAINT fk_notifications_target
-                           FOREIGN KEY (target_user_id) REFERENCES users(id) ON DELETE CASCADE""")
-        conn.commit(); cur.close(); conn.close()
-    except Exception as e:
-        logger.error(f"Notification schema migration failed: {e}")
-
-def ensure_notification_status_table():
-    try:
-        conn = get_db(); cur = conn.cursor()
-        cur.execute("SHOW TABLES LIKE 'notification_user_status'")
-        if not cur.fetchall():
-            cur.execute("""
-              CREATE TABLE notification_user_status (
-                notification_id INT NOT NULL,
-                user_id INT NOT NULL,
-                deleted_at TIMESTAMP NULL,
-                PRIMARY KEY (notification_id, user_id),
-                FOREIGN KEY (notification_id) REFERENCES notifications(id) ON DELETE CASCADE,
-                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-              )
-            """)
-            conn.commit()
-        cur.close(); conn.close()
-    except Exception as e:
-        logger.error(f"Ensure notification_user_status failed: {e}")
-
-def ensure_complaints_schema():
-    try:
-        conn = get_db()
-        cur = conn.cursor()
-        
-        # Check if complaints table exists
-        cur.execute("SHOW TABLES LIKE 'complaints'")
-        if not cur.fetchall():
-            # Create complaints table if it doesn't exist
-            cur.execute("""
-                CREATE TABLE complaints (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    user_id INT NOT NULL,
-                    subject VARCHAR(255) NOT NULL,
-                    description TEXT NOT NULL,
-                    status ENUM('open', 'in_progress', 'resolved') DEFAULT 'open',
-                    admin_response TEXT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-                )
-            """)
-            logger.info("Created complaints table")
-        else:
-            # Check and add missing columns
-            cur.execute("SHOW COLUMNS FROM complaints")
-            columns = {row[0] for row in cur.fetchall()}
-            
-            if 'admin_response' not in columns:
-                cur.execute("ALTER TABLE complaints ADD COLUMN admin_response TEXT NULL")
-                logger.info("Added admin_response column to complaints")
-            
-            if 'updated_at' not in columns:
-                cur.execute("ALTER TABLE complaints ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP")
-                logger.info("Added updated_at column to complaints")
-        
-        conn.commit()
-        cur.close()
-        conn.close()
-        
-    except Exception as e:
-        logger.error(f"Complaints schema migration failed: {e}")
-
-def ensure_grades_schema():
-    try:
-        conn = get_db()
-        cur = conn.cursor()
-        
-        # Check if grades table exists
-        cur.execute("SHOW TABLES LIKE 'grades'")
-        if not cur.fetchall():
-            # Create grades table if it doesn't exist
-            cur.execute("""
-                CREATE TABLE grades (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    student_id INT NOT NULL,
-                    course_id INT NOT NULL,
-                    marks DECIMAL(5,2) DEFAULT 0,
-                    grade VARCHAR(5) DEFAULT 'F',
-                    semester INT DEFAULT 1,
-                    academic_year VARCHAR(10) DEFAULT '2023-24',
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                    FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE,
-                    FOREIGN KEY (course_id) REFERENCES courses(id) ON DELETE CASCADE,
-                    UNIQUE KEY unique_student_course (student_id, course_id)
-                )
-            """)
-            logger.info("Created grades table")
-        else:
-            # Check and add missing columns
-            cur.execute("SHOW COLUMNS FROM grades")
-            columns = {row[0] for row in cur.fetchall()}
-            
-            if 'semester' not in columns:
-                cur.execute("ALTER TABLE grades ADD COLUMN semester INT DEFAULT 1")
-                logger.info("Added semester column to grades")
-            
-            if 'academic_year' not in columns:
-                cur.execute("ALTER TABLE grades ADD COLUMN academic_year VARCHAR(10) DEFAULT '2023-24'")
-                logger.info("Added academic_year column to grades")
-            
-            if 'updated_at' not in columns:
-                cur.execute("ALTER TABLE grades ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP")
-                logger.info("Added updated_at column to grades")
-        
-        conn.commit()
-        cur.close()
-        conn.close()
-        
-    except Exception as e:
-        logger.error(f"Grades schema migration failed: {e}")
-
-# Seed admin and ensure notification columns
 ensure_default_admin()
-ensure_notifications_schema()
-ensure_notification_status_table()
-ensure_complaints_schema()
-ensure_grades_schema()
-
-@app.before_first_request
-def _init_system():
-    ensure_default_admin()
-    ensure_notifications_schema()
-    ensure_notification_status_table()
-    ensure_complaints_schema()
-    ensure_grades_schema()
 
 @app.route('/api/admin/login', methods=['POST'])
 def admin_login():
     data = request.get_json()
-    username = data.get('username'); password = data.get('password')
+    username = data.get('username')
+    password = data.get('password')
     if not username or not password:
         return jsonify({'success': False, 'message': 'Username and password required'}), 400
     if username != ADMIN_USERNAME:
@@ -324,7 +173,6 @@ def admin_login():
         cur.execute("SELECT id, password_hash FROM users WHERE username=%s AND role='admin'", (ADMIN_USERNAME,))
         admin = cur.fetchone(); cur.close(); conn.close()
         if not admin:
-            # Attempt repair then retry once
             ensure_default_admin()
             conn = get_db(); cur = conn.cursor(dictionary=True)
             cur.execute("SELECT id, password_hash FROM users WHERE username=%s AND role='admin'", (ADMIN_USERNAME,))
@@ -384,51 +232,80 @@ def staff_login():
 
 @app.route('/api/student/login', methods=['POST'])
 def student_login():
-    data = request.get_json()
-    identifier = data.get('username'); password = data.get('password')
-    if not identifier or not password:
-        return jsonify({'success': False, 'message': 'Username/Roll and password required'}), 400
+    """Student login endpoint"""
     try:
-        conn = get_db(); cur = conn.cursor(dictionary=True)
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+        
+        # Accept both 'identifier' and 'username' for compatibility
+        identifier = data.get('identifier') or data.get('username')
+        password = data.get('password')
+        
+        if not identifier or not password:
+            return jsonify({'error': 'Username and password are required'}), 400
+        
+        # Use raw SQL query like other endpoints
+        conn = get_db()
+        cur = conn.cursor(dictionary=True)
+        
+        # Try to find student by username or roll_no (in students table)
         cur.execute("""
-            SELECT u.id AS user_id, u.username, u.password_hash,
-                   s.roll_no, s.course, s.semester,
-                   u.full_name, u.email
+            SELECT u.id, u.username, u.full_name, u.email, u.password_hash, u.role,
+                   s.roll_no as enrollment_number
             FROM users u
-            JOIN students s ON s.user_id = u.id
-            WHERE u.username=%s OR s.roll_no=%s
-            LIMIT 1
-        """,(identifier, identifier))
-        rec = cur.fetchone(); cur.close(); conn.close()
-        if not rec or not bcrypt.verify(password, rec['password_hash']):
-            logger.warning(f"Student login failed identifier={identifier}")
+            LEFT JOIN students s ON s.user_id = u.id
+            WHERE u.role = 'student' AND (u.username = %s OR s.roll_no = %s)
+        """, (identifier, identifier))
+        
+        student = cur.fetchone()
+        cur.close()
+        conn.close()
+        
+        if not student:
+            app.logger.warning(f'Student login failed identifier={identifier}')
             return jsonify({'success': False, 'message': 'Invalid credentials'}), 401
-        token = f"student_token_{rec['username']}_{int(time.time())}"
+        
+        # Check password using bcrypt (same as other login endpoints)
+        if not bcrypt.verify(password, student['password_hash']):
+            app.logger.warning(f'Student login failed identifier={identifier}')
+            return jsonify({'success': False, 'message': 'Invalid credentials'}), 401
+        
+        # Generate token (simple token like other endpoints)
+        token = f"student_token_{student['username']}_{int(time.time())}"
+        
+        # Remove password hash from response
         student_data = {
-            'id': rec['user_id'],
-            'username': rec['username'],
-            'full_name': rec['full_name'],
-            'email': rec['email'],
-            'roll_no': rec['roll_no'],
-            'course': rec['course'],
-            'semester': rec['semester']
+            'id': student['id'],
+            'username': student['username'],
+            'full_name': student['full_name'],
+            'email': student['email'],
+            'role': student['role'],
+            'enrollment_number': student['enrollment_number']
         }
-        logger.info(f"Student {rec['username']} logged in")
-        return jsonify({'success': True, 'token': token, 'student': student_data, 'message': 'Login successful'}), 200
+        
+        app.logger.info(f'Student login successful identifier={identifier} user_id={student["id"]}')
+        
+        return jsonify({
+            'success': True,
+            'token': token,
+            'student': student_data,
+            'message': 'Login successful'
+        }), 200
+        
     except Exception as e:
-        logger.error(f"Student login error: {e}")
-        return jsonify({'success': False, 'message': 'Database error'}), 500
+        app.logger.error(f'Student login error: {str(e)}')
+        return jsonify({'success': False, 'message': 'Internal server error'}), 500
 
-@app.route('/api/verify-token', methods=['POST'])
-def verify_token():
-    data = request.get_json()
-    token = data.get('token')
-    user_type = data.get('user_type')  # admin, staff, student
-    
-    if token and token.startswith(f"{user_type}_token_"):
-        return jsonify({'valid': True}), 200
-    else:
-        return jsonify({'valid': False}), 401
+def check_password(password_hash, password):
+    """Check if provided password matches the hash"""
+    # If you're using werkzeug.security
+    try:
+        from werkzeug.security import check_password_hash
+        return check_password_hash(password_hash, password)
+    except ImportError:
+        # Simple comparison if no hashing is implemented
+        return password_hash == password
 
 # ============ STUDENT ENDPOINTS ============
 @app.route('/api/student/<int:user_id>/summary', methods=['GET'])
@@ -439,8 +316,7 @@ def student_summary(user_id):
         cur.execute("SELECT id FROM students WHERE user_id=%s", (user_id,))
         s = cur.fetchone()
         if not s:
-            cur.close()
-            conn.close()
+            cur.close(); conn.close()
             return jsonify({"error": "Student not found"}), 404
         sid = s['id']
         
@@ -459,8 +335,7 @@ def student_summary(user_id):
         f = cur.fetchone()
         pending_fees = f['pending'] or 0
         
-        cur.close()
-        conn.close()
+        cur.close(); conn.close()
         return jsonify({
             "attendance_percent": overall,
             "days_present": present,
@@ -514,33 +389,13 @@ def student_grades(user_id):
         conn = get_db()
         cur = conn.cursor(dictionary=True)
         
-        # Debug: Log the user_id being queried
-        logger.info(f"Fetching grades for user_id: {user_id}")
-        
-        # Get student record
         cur.execute("SELECT id FROM students WHERE user_id=%s", (user_id,))
         s = cur.fetchone()
         if not s:
             cur.close(); conn.close()
-            logger.warning(f"Student not found for user_id: {user_id}")
             return jsonify({"error":"Student not found"}), 404
         
         sid = s['id']
-        logger.info(f"Found student record with id: {sid}")
-        
-        # Check if grades table exists
-        cur.execute("SHOW TABLES LIKE 'grades'")
-        if not cur.fetchall():
-            cur.close(); conn.close()
-            logger.info(f"No grades table found for student {user_id}")
-            return jsonify([])  # Return empty array if no grades table
-        
-        # Check if student has any grades
-        cur.execute("SELECT COUNT(*) as count FROM grades WHERE student_id=%s", (sid,))
-        count_result = cur.fetchone()
-        logger.info(f"Found {count_result['count']} grades for student_id: {sid}")
-        
-        # Enhanced query to include more grade information
         cur.execute("""
           SELECT c.code, c.title, c.credits, g.marks, g.grade,
                  g.semester, g.academic_year, g.created_at
@@ -550,31 +405,9 @@ def student_grades(user_id):
           ORDER BY g.semester DESC, c.code ASC
         """, (sid,))
         data = cur.fetchall()
-        
-        logger.info(f"Query returned {len(data)} grade records")
-        
-        # Process the data to ensure consistent format
-        formatted_data = []
-        for i, grade in enumerate(data):
-            formatted_grade = {
-                'code': grade.get('code', f'COURSE{i+1}'),
-                'title': grade.get('title', f'Course {i+1}'),
-                'marks': float(grade.get('marks', 0)) if grade.get('marks') else 0,
-                'grade': grade.get('grade', ''),
-                'credits': int(grade.get('credits', 3)),
-                'semester': grade.get('semester', (i // 6) + 1),
-                'academic_year': grade.get('academic_year', '2023-24'),
-                'created_at': grade.get('created_at').isoformat() if grade.get('created_at') else None
-            }
-            formatted_data.append(formatted_grade)
-        
         cur.close(); conn.close()
-        logger.info(f"Retrieved {len(formatted_data)} grades for student {user_id}")
-        return jsonify(formatted_data)
         
-    except mysql.connector.Error as e:
-        logger.error(f"Database error in student_grades for user {user_id}: {e}")
-        return jsonify({"error": "Database error"}), 500
+        return jsonify(data)
     except Exception as e:
         logger.error(f"Student grades error for user {user_id}: {e}")
         return jsonify({"error": "Internal server error"}), 500
@@ -621,14 +454,11 @@ def get_student_complaints(user_id):
     try:
         conn = get_db()
         cur = conn.cursor(dictionary=True)
-        # Verify the user exists and is a student
         cur.execute("SELECT id FROM users WHERE id=%s AND role='student'", (user_id,))
         if not cur.fetchone():
-            cur.close()
-            conn.close()
+            cur.close(); conn.close()
             return jsonify({"error": "Student not found"}), 404
         
-        # Get all complaints submitted by this student
         cur.execute("""
             SELECT c.id, c.subject, c.description, c.status, c.created_at,
                    c.admin_response, c.updated_at
@@ -638,10 +468,8 @@ def get_student_complaints(user_id):
         """, (user_id,))
         
         complaints = cur.fetchall()
-        cur.close()
-        conn.close()
+        cur.close(); conn.close()
         
-        # Format the response
         formatted_complaints = []
         for complaint in complaints:
             formatted_complaints.append({
@@ -656,9 +484,75 @@ def get_student_complaints(user_id):
         
         logger.info(f"Retrieved {len(formatted_complaints)} complaints for student {user_id}")
         return jsonify(formatted_complaints)
-        
     except Exception as e:
         logger.error(f"Get student complaints error: {e}")
+        return jsonify({"error": "Internal server error"}), 500
+
+# ============ FEES ENDPOINTS ============
+@app.route('/api/student/<int:user_id>/fees', methods=['GET'])
+def get_student_fees(user_id):
+    try:
+        conn = get_db()
+        cur = conn.cursor(dictionary=True)
+        cur.execute("SELECT id FROM students WHERE user_id=%s", (user_id,))
+        s = cur.fetchone()
+        if not s:
+            cur.close(); conn.close()
+            return jsonify({"error": "Student not found"}), 404
+        sid = s['id']
+
+        cur.execute("""
+            SELECT id, amount, reason, due_date, status, payment_method, payment_reference, created_at
+            FROM fees
+            WHERE student_id=%s
+            ORDER BY created_at DESC
+        """, (sid,))
+        rows = cur.fetchall()
+        cur.close(); conn.close()
+
+        for r in rows:
+            if r.get('created_at'):
+                r['created_at'] = r['created_at'].isoformat()
+            if r.get('due_date'):
+                r['due_date'] = r['due_date'].isoformat()
+        return jsonify(rows)
+    except Exception as e:
+        logger.error(f"Get student fees error for {user_id}: {e}")
+        return jsonify({"error": "Internal server error"}), 500
+
+@app.route('/api/student/<int:user_id>/pay-fee', methods=['POST'])
+def student_pay_fee(user_id):
+    try:
+        body = request.get_json() or {}
+        amount = body.get('amount')
+        reason = (body.get('reason') or '').strip()
+        due_date = body.get('due_date')
+        payment_method = body.get('payment_method')
+
+        if amount is None:
+            return jsonify({"error": "amount required"}), 400
+
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("SELECT id FROM students WHERE user_id=%s", (user_id,))
+        s = cur.fetchone()
+        if not s:
+            cur.close(); conn.close()
+            return jsonify({"error": "Student not found"}), 404
+        sid = s[0]
+
+        cur.execute("""
+            INSERT INTO fees (student_id, amount, reason, due_date, payment_method, status)
+            VALUES (%s,%s,%s,%s,%s,%s)
+        """, (sid, float(amount), reason or None, due_date, payment_method, 'pending'))
+
+        conn.commit()
+        new_id = cur.lastrowid
+        cur.close(); conn.close()
+        logger.info(f"Fee record created for student {user_id} id={new_id} reason={reason}")
+        return jsonify({"ok": True, "fee_id": new_id})
+    except Exception as e:
+        logger.error(f"student_pay_fee error for {user_id}: {e}")
         return jsonify({"error": "Internal server error"}), 500
 
 # ============ STAFF ENDPOINTS ============
@@ -711,7 +605,7 @@ def mark_attendance():
     body = request.json
     course_id = body.get('course_id')
     date = body.get('date')
-    students = body.get('students')  # [{student_id, present}, ...]
+    students = body.get('students')
     
     conn = get_db(); cur = conn.cursor()
     for s in students:
@@ -724,23 +618,110 @@ def mark_attendance():
     cur.close(); conn.close()
     return jsonify({"ok":True})
 
-@app.route('/api/staff/grades', methods=['POST'])
-def enter_grades():
-    body = request.json
-    student_id = body.get('student_id')
-    course_id = body.get('course_id')
-    marks = body.get('marks')
-    grade = body.get('grade')
-    
-    conn = get_db(); cur = conn.cursor()
-    cur.execute("""
-      INSERT INTO grades (student_id, course_id, marks, grade)
-      VALUES (%s, %s, %s, %s)
-      ON DUPLICATE KEY UPDATE marks=%s, grade=%s
-    """, (student_id, course_id, marks, grade, marks, grade))
-    conn.commit()
-    cur.close(); conn.close()
-    return jsonify({"ok":True})
+@app.route('/api/staff/grades/auto', methods=['POST'])
+def staff_grades_auto():
+    try:
+        body = request.json or {}
+        student_id = body.get('student_id')
+        sem_no = body.get('sem_no', 1)
+        subjects_input = body.get('subjects', [])
+        
+        if not student_id or not subjects_input:
+            return jsonify({"error": "student_id and subjects required"}), 400
+        
+        conn = get_db()
+        cur = conn.cursor(dictionary=True)
+        
+        cur.execute("SELECT id FROM students WHERE id=%s", (student_id,))
+        if not cur.fetchone():
+            cur.close(); conn.close()
+            return jsonify({"error": "Student not found"}), 404
+        
+        def compute_grade_and_points(marks):
+            marks = float(marks or 0)
+            if marks >= 90: return 'O', 10
+            elif marks >= 80: return 'A+', 9
+            elif marks >= 70: return 'A', 8
+            elif marks >= 60: return 'B+', 7
+            elif marks >= 55: return 'B', 6
+            elif marks >= 50: return 'C', 5
+            elif marks >= 45: return 'P', 4
+            else: return 'F', 0
+        
+        computed_subjects = []
+        
+        for subj in subjects_input:
+            course_code = subj.get('course_code')
+            marks = subj.get('marks', 0)
+            
+            if not course_code:
+                continue
+            
+            cur.execute("SELECT id, title, credits FROM courses WHERE code=%s", (course_code,))
+            course = cur.fetchone()
+            if not course:
+                cur.close(); conn.close()
+                return jsonify({"error": f"Course {course_code} not found"}), 404
+            
+            grade, grade_point = compute_grade_and_points(marks)
+            
+            cur.execute("""
+                INSERT INTO grades (student_id, course_id, marks, grade, semester, grade_point, credits, recorded_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
+                ON DUPLICATE KEY UPDATE
+                marks=%s, grade=%s, grade_point=%s, credits=%s, recorded_at=NOW()
+            """, (student_id, course['id'], marks, grade, sem_no, grade_point, course['credits'],
+                  marks, grade, grade_point, course['credits']))
+            
+            computed_subjects.append({
+                'course_code': course_code,
+                'course_title': course['title'],
+                'marks': marks,
+                'grade': grade,
+                'grade_point': grade_point,
+                'credits': course['credits'],
+                'semester': sem_no
+            })
+        
+        cur.execute("""
+            SELECT g.marks, g.grade, g.grade_point, c.credits
+            FROM grades g
+            JOIN courses c ON g.course_id = c.id
+            WHERE g.student_id = %s AND g.semester = %s
+        """, (student_id, sem_no))
+        sem_grades = cur.fetchall()
+        
+        total_credits = sum(float(g['credits'] or 3) for g in sem_grades)
+        weighted_points = sum(float(g['grade_point'] or 0) * float(g['credits'] or 3) for g in sem_grades)
+        semester_gpa = weighted_points / total_credits if total_credits > 0 else 0
+        
+        cur.execute("""
+            SELECT g.marks, g.grade, g.grade_point, c.credits
+            FROM grades g
+            JOIN courses c ON g.course_id = c.id
+            WHERE g.student_id = %s
+        """, (student_id,))
+        all_grades = cur.fetchall()
+        
+        total_all_credits = sum(float(g['credits'] or 3) for g in all_grades)
+        weighted_all_points = sum(float(g['grade_point'] or 0) * float(g['credits'] or 3) for g in all_grades)
+        cgpa = weighted_all_points / total_all_credits if total_all_credits > 0 else 0
+        
+        conn.commit()
+        cur.close()
+        conn.close()
+        
+        logger.info(f"Auto-computed grades for student {student_id}, semester {sem_no}")
+        
+        return jsonify({
+            "ok": True,
+            "subjects": computed_subjects,
+            "semester_gpa": round(semester_gpa, 2),
+            "cgpa": round(cgpa, 2)
+        })
+    except Exception as e:
+        logger.error(f"Auto-grades error: {e}")
+        return jsonify({"error": "Internal server error"}), 500
 
 @app.route('/api/staff/upload-material', methods=['POST'])
 def upload_material():
@@ -811,13 +792,10 @@ def admin_summary():
     
     cur.execute("SELECT COUNT(*) as total FROM students")
     students = cur.fetchone()
-    
     cur.execute("SELECT COUNT(*) as total FROM staff")
     staff = cur.fetchone()
-    
     cur.execute("SELECT COUNT(*) as total FROM courses")
     courses = cur.fetchone()
-    
     cur.execute("SELECT COUNT(*) as total FROM complaints WHERE status='open'")
     complaints = cur.fetchone()
     
@@ -829,18 +807,41 @@ def admin_summary():
         "open_complaints": complaints['total']
     })
 
-@app.route('/api/admin/users', methods=['GET'])
-def get_users():
-    role = request.args.get('role', 'all')
-    conn = get_db()
-    cur = conn.cursor(dictionary=True)
-    if role == 'all':
-        cur.execute("SELECT id, username, role, full_name, email, created_at FROM users")
-    else:
-        cur.execute("SELECT id, username, role, full_name, email, created_at FROM users WHERE role=%s", (role,))
-    data = cur.fetchall()
-    cur.close(); conn.close()
-    return jsonify(data)
+@app.route('/api/admin/students', methods=['GET'])
+def admin_list_students():
+    try:
+        conn = get_db(); cur = conn.cursor(dictionary=True)
+        cur.execute("""
+            SELECT u.id AS user_id, u.username, u.full_name, u.email, u.created_at,
+                   s.id AS student_id, s.roll_no, s.course, s.semester
+            FROM users u
+            JOIN students s ON s.user_id = u.id
+            WHERE u.role='student'
+            ORDER BY u.created_at DESC
+        """)
+        rows = cur.fetchall(); cur.close(); conn.close()
+        return jsonify(rows)
+    except Exception as e:
+        logger.error(f"List students error: {e}")
+        return jsonify({"error":"Internal server error"}), 500
+
+@app.route('/api/admin/staff', methods=['GET'])
+def admin_list_staff():
+    try:
+        conn = get_db(); cur = conn.cursor(dictionary=True)
+        cur.execute("""
+            SELECT u.id AS user_id, u.username, u.full_name, u.email, u.created_at,
+                   s.id AS staff_row_id, s.dept, s.designation
+            FROM users u
+            JOIN staff s ON s.user_id = u.id
+            WHERE u.role='staff'
+            ORDER BY u.created_at DESC
+        """)
+        rows = cur.fetchall(); cur.close(); conn.close()
+        return jsonify(rows)
+    except Exception as e:
+        logger.error(f"List staff error: {e}")
+        return jsonify({"error":"Internal server error"}), 500
 
 @app.route('/api/admin/user', methods=['POST'])
 def add_user():
@@ -860,23 +861,16 @@ def add_user():
             roll_no = body.get('roll_no'); course = body.get('course'); semester = body.get('semester')
             if not roll_no or not course or semester is None:
                 conn.rollback(); cur.close(); conn.close()
-                return jsonify({"error":"Student fields required (roll_no, course, semester)"}), 400
-            if students_has_auth_cols():
-                cur.execute(
-                    "INSERT INTO students (user_id, username, password_hash, roll_no, course, semester) VALUES (%s,%s,%s,%s,%s,%s)",
-                    (user_id, username, password_hash, roll_no, course, semester)
-                )
-            else:
-                # Backward-compatible insert for older schema
-                cur.execute(
-                    "INSERT INTO students (user_id, roll_no, course, semester) VALUES (%s,%s,%s,%s)",
-                    (user_id, roll_no, course, semester)
-                )
+                return jsonify({"error":"Student fields required"}), 400
+            cur.execute(
+                "INSERT INTO students (user_id, username, password_hash, roll_no, course, semester, full_name, email) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
+                (user_id, username, password_hash, roll_no, course, semester, full_name, email)
+            )
         elif role == 'staff':
             dept = body.get('dept'); designation = body.get('designation')
             if not dept or not designation:
                 conn.rollback(); cur.close(); conn.close()
-                return jsonify({"error":"Staff fields required (dept, designation)"}), 400
+                return jsonify({"error":"Staff fields required"}), 400
             cur.execute("INSERT INTO staff (user_id, dept, designation) VALUES (%s,%s,%s)",
                         (user_id, dept, designation))
 
@@ -885,14 +879,7 @@ def add_user():
         return jsonify({"ok": True, "user_id": user_id})
     except mysql.connector.IntegrityError as e:
         logger.warning(f"Integrity error adding user: {e}")
-        msg = "Username or email already exists"
-        if "for key 'students.username'" in str(e):
-            msg = "Student username already exists"
-        elif "for key 'students.roll_no'" in str(e):
-            msg = "Student roll number already exists"
-        elif "for key 'staff.user_id'" in str(e):
-            msg = "Staff already exists for this user"
-        return jsonify({"error": msg}), 409
+        return jsonify({"error": "Username or email already exists"}), 409
     except Exception as e:
         logger.error(f"Add user error: {e}")
         return jsonify({"error": "Internal server error"}), 500
@@ -924,8 +911,7 @@ def add_course():
         conn.close()
         logger.info(f"Course {code} added successfully")
         return jsonify({"ok": True})
-    except mysql.connector.IntegrityError as e:
-        logger.warning(f"Integrity error adding course: {e}")
+    except mysql.connector.IntegrityError:
         return jsonify({"error": "Course code already exists"}), 409
     except Exception as e:
         logger.error(f"Add course error: {e}")
@@ -944,7 +930,6 @@ def get_complaints():
     """)
     data = cur.fetchall()
     
-    # Format datetime objects to ISO strings
     for complaint in data:
         if complaint['created_at']:
             complaint['created_at'] = complaint['created_at'].isoformat()
@@ -985,93 +970,6 @@ def update_complaint_status(id):
         logger.error(f"Update complaint status error: {e}")
         return jsonify({"error": "Internal server error"}), 500
 
-@app.route('/api/admin/students', methods=['GET'])
-def admin_list_students():
-    try:
-        conn = get_db(); cur = conn.cursor(dictionary=True)
-        cur.execute("""
-            SELECT u.id AS user_id, u.username, u.full_name, u.email, u.created_at,
-                   s.id AS student_id, s.roll_no, s.course, s.semester
-            FROM users u
-            JOIN students s ON s.user_id = u.id
-            WHERE u.role='student'
-            ORDER BY u.created_at DESC
-        """)
-        rows = cur.fetchall(); cur.close(); conn.close()
-        return jsonify(rows)
-    except Exception as e:
-        logger.error(f"List students error: {e}")
-        return jsonify({"error":"Internal server error"}), 500
-
-@app.route('/api/admin/staff', methods=['GET'])
-def admin_list_staff():
-    try:
-        conn = get_db(); cur = conn.cursor(dictionary=True)
-        cur.execute("""
-            SELECT u.id AS user_id, u.username, u.full_name, u.email, u.created_at,
-                   s.id AS staff_row_id, s.dept, s.designation
-            FROM users u
-            JOIN staff s ON s.user_id = u.id
-            WHERE u.role='staff'
-            ORDER BY u.created_at DESC
-        """)
-        rows = cur.fetchall(); cur.close(); conn.close()
-        return jsonify(rows)
-    except Exception as e:
-        logger.error(f"List staff error: {e}")
-        return jsonify({"error":"Internal server error"}), 500
-
-@app.route('/api/admin/user/<int:user_id>', methods=['PUT'])
-def admin_update_user(user_id):
-    try:
-        body = request.json or {}
-        conn = get_db(); cur = conn.cursor(dictionary=True)
-        cur.execute("SELECT id, role FROM users WHERE id=%s", (user_id,))
-        u = cur.fetchone()
-        if not u:
-            cur.close(); conn.close()
-            return jsonify({"error":"User not found"}), 404
-        updates = []
-        params = []
-        if body.get('username'):
-            updates.append("username=%s"); params.append(body['username'])
-        if body.get('full_name'):
-            updates.append("full_name=%s"); params.append(body['full_name'])
-        if body.get('email'):
-            updates.append("email=%s"); params.append(body['email'])
-        if body.get('password'):
-            updates.append("password_hash=%s"); params.append(bcrypt.hash(body['password']))
-        # Only update users table if there is something
-        if updates:
-            sql = "UPDATE users SET " + ", ".join(updates) + " WHERE id=%s"
-            params.append(user_id)
-            cur.execute(sql, tuple(params))
-        # Role-specific
-        if u['role'] == 'student':
-            stu_updates = []
-            stu_params = []
-            if 'roll_no' in body: stu_updates.append("roll_no=%s"); stu_params.append(body['roll_no'])
-            if 'course' in body: stu_updates.append("course=%s"); stu_params.append(body['course'])
-            if 'semester' in body: stu_updates.append("semester=%s"); stu_params.append(body['semester'])
-            if stu_updates:
-                cur.execute("UPDATE students SET " + ", ".join(stu_updates) + " WHERE user_id=%s",
-                            tuple(stu_params+[user_id]))
-        elif u['role'] == 'staff':
-            stf_updates = []
-            stf_params = []
-            if 'dept' in body: stf_updates.append("dept=%s"); stf_params.append(body['dept'])
-            if 'designation' in body: stf_updates.append("designation=%s"); stf_params.append(body['designation'])
-            if stf_updates:
-                cur.execute("UPDATE staff SET " + ", ".join(stf_updates) + " WHERE user_id=%s",
-                            tuple(stf_params+[user_id]))
-        conn.commit(); cur.close(); conn.close()
-        return jsonify({"ok":True})
-    except mysql.connector.IntegrityError:
-        return jsonify({"error":"Duplicate username/email"}), 409
-    except Exception as e:
-        logger.error(f"Update user error: {e}")
-        return jsonify({"error":"Internal server error"}), 500
-
 @app.route('/api/admin/user/<int:user_id>', methods=['DELETE'])
 def admin_delete_user(user_id):
     try:
@@ -1085,26 +983,6 @@ def admin_delete_user(user_id):
     except Exception as e:
         logger.error(f"Delete user error: {e}")
         return jsonify({"error":"Internal server error"}), 500
-
-# ============ NOTIFICATIONS ============
-@app.route('/api/notifications', methods=['GET'])
-def get_notifications():
-    target = request.args.get('role','all')
-    conn = get_db()
-    cur = conn.cursor(dictionary=True)
-    base = """
-      SELECT n.id, n.title, n.body, n.target_role, n.created_at,
-             u.username AS sender_username, u.full_name AS sender_full_name
-      FROM notifications n
-      LEFT JOIN users u ON n.sender_user_id = u.id
-    """
-    if target=='all':
-        cur.execute(base + " ORDER BY n.created_at DESC LIMIT 50")
-    else:
-        cur.execute(base + " WHERE n.target_role IN ('all', %s) ORDER BY n.created_at DESC LIMIT 50",(target,))
-    data = cur.fetchall()
-    cur.close(); conn.close()
-    return jsonify(data)
 
 @app.route('/api/notification', methods=['POST'])
 def send_notification():
@@ -1125,27 +1003,9 @@ def send_notification():
             (title, message, target_role)
         )
         conn.commit()
+        cur.close(); conn.close()
 
-        recipient_emails = []
-        rcur = conn.cursor()
-        if target_role == 'student':
-            rcur.execute("SELECT email FROM users WHERE role='student'")
-        elif target_role == 'staff':
-            rcur.execute("SELECT email FROM users WHERE role='staff'")
-        elif target_role == 'admin':
-            rcur.execute("SELECT email FROM users WHERE role='admin'")
-        else:
-            rcur.execute("SELECT email FROM users WHERE role IN ('student','staff','admin')")
-        recipient_emails = [r[0] for r in rcur.fetchall() if r[0]]
-        rcur.close(); cur.close(); conn.close()
-
-        return jsonify({
-            "ok": True,
-            "emails_queued": len(recipient_emails)
-        })
-    except mysql.connector.IntegrityError as e:
-        logger.error(f"Notification integrity error: {e}")
-        return jsonify({"error": "DB integrity error"}), 409
+        return jsonify({"ok": True, "emails_queued": 0})
     except Exception as e:
         logger.error(f"Send notification error: {e}")
         return jsonify({"error": str(e) or 'Internal error'}), 500
@@ -1158,53 +1018,17 @@ def delete_notification(notification_id):
         if not user_id:
             return jsonify({"error": "user_id required"}), 400
         conn = get_db()
-        cur = conn.cursor(dictionary=True)
-        cur.execute("SELECT id, sender_user_id FROM notifications WHERE id=%s", (notification_id,))
-        row = cur.fetchone()
-        if not row:
-            cur.close(); conn.close()
-            return jsonify({"error": "Not found"}), 404
-        cur.execute("SELECT role FROM users WHERE id=%s", (user_id,))
-        u = cur.fetchone()
-        role = u['role'] if u else None
-        # admin can hard delete
-        if role == 'admin':
-            cur.execute("DELETE FROM notifications WHERE id=%s", (notification_id,))
-            conn.commit()
-            cur.close(); conn.close()
-            return jsonify({"ok": True, "mode": "hard"})
-        # else soft delete would go here if implemented
+        cur = conn.cursor()
+        cur.execute("DELETE FROM notifications WHERE id=%s", (notification_id,))
+        conn.commit()
         cur.close(); conn.close()
-        return jsonify({"ok": True, "mode": "soft"})
+        return jsonify({"ok": True})
     except Exception as e:
         logger.error(f"Delete notification error: {e}")
         return jsonify({"error": "Internal server error"}), 500
 
-# ============ SERVE FRONTEND ============
-FRONTEND_DIR = os.path.join(os.path.dirname(__file__), '..', 'Frontend')
-FRONTEND_INDEX = os.path.join(FRONTEND_DIR, 'index.html')
-
-@app.route('/')
-def serve_root():
-    return send_file(FRONTEND_INDEX)
-
-@app.route('/api/users', methods=['GET'])
-def public_users():
-    role = request.args.get('role','all')
-    conn = get_db()
-    cur = conn.cursor(dictionary=True)
-    if role == 'all':
-        cur.execute("SELECT id, username, role, full_name, email, created_at FROM users")
-    else:
-        cur.execute("SELECT id, username, role, full_name, email, created_at FROM users WHERE role=%s",(role,))
-    rows = cur.fetchall()
-    cur.close()
-    conn.close()
-    return jsonify(rows)
-
 @app.route('/api/user/<int:user_id>/notifications', methods=['GET'])
 def user_notifications(user_id):
-    """Return notifications for a specific user: role-based + direct (target_user_id)."""
     try:
         conn = get_db()
         cur = conn.cursor(dictionary=True)
@@ -1232,197 +1056,91 @@ def user_notifications(user_id):
         logger.error(f"User notifications error: {e}")
         return jsonify({"error":"Internal server error"}), 500
 
-@app.route('/api/debug/create-sample-grades/<int:user_id>', methods=['POST'])
-def create_sample_grades(user_id):
-    """Debug endpoint to create sample grades for a student"""
-    try:
-        conn = get_db()
-        cur = conn.cursor(dictionary=True)
-        
-        # Get student record
-        cur.execute("SELECT id FROM students WHERE user_id=%s", (user_id,))
-        s = cur.fetchone()
-        if not s:
-            cur.close(); conn.close()
-            return jsonify({"error":"Student not found"}), 404
-        
-        sid = s['id']
-        
-        # Get some courses
-        cur.execute("SELECT id, code, title FROM courses LIMIT 5")
-        courses = cur.fetchall()
-        
-        if not courses:
-            # Create some sample courses first
-            sample_courses = [
-                ('CS101', 'Introduction to Programming', 3),
-                ('MATH201', 'Calculus I', 4),
-                ('ENG101', 'English Literature', 3),
-                ('PHY101', 'Physics I', 4),
-                ('CHEM101', 'General Chemistry', 3)
-            ]
-            
-            for code, title, credits in sample_courses:
-                cur.execute("INSERT IGNORE INTO courses (code, title, credits) VALUES (%s, %s, %s)", 
-                           (code, title, credits))
-            
-            conn.commit()
-            cur.execute("SELECT id, code, title FROM courses LIMIT 5")
-            courses = cur.fetchall()
-        
-        # Create sample grades
-        import random
-        grades_created = 0
-        
-        for course in courses:
-            marks = random.randint(60, 95)
-            if marks >= 90: grade = 'A+'
-            elif marks >= 80: grade = 'A'
-            elif marks >= 70: grade = 'B+'
-            elif marks >= 60: grade = 'B'
-            else: grade = 'C'
-            
-            cur.execute("""
-                INSERT IGNORE INTO grades (student_id, course_id, marks, grade, semester) 
-                VALUES (%s, %s, %s, %s, %s)
-            """, (sid, course['id'], marks, grade, 1))
-            
-            if cur.rowcount > 0:
-                grades_created += 1
-        
-        conn.commit()
-        cur.close()
-        conn.close()
-        
-        logger.info(f"Created {grades_created} sample grades for student {user_id}")
-        return jsonify({"ok": True, "grades_created": grades_created})
-        
-    except Exception as e:
-        logger.error(f"Create sample grades error: {e}")
-        return jsonify({"error": str(e)}), 500
+# ============ SERVE FRONTEND ============
+FRONTEND_DIR = os.path.join(os.path.dirname(__file__), '..', 'Frontend')
+FRONTEND_INDEX = os.path.join(FRONTEND_DIR, 'index.html')
 
-@app.route('/api/staff/grades/auto', methods=['POST'])
-def staff_grades_auto():
-    """
-    Auto-compute grades from marks. Expects:
-    { student_id, sem_no, subjects: [{ course_code, marks }], entered_by_user_id? }
-    Returns: { subjects: [...], semester_gpa, cgpa, semesters_summary }
-    """
-    try:
-        body = request.json or {}
-        student_id = body.get('student_id')
-        sem_no = body.get('sem_no', 1)
-        subjects_input = body.get('subjects', [])
-        entered_by = body.get('entered_by_user_id')
-        
-        if not student_id or not subjects_input:
-            return jsonify({"error": "student_id and subjects required"}), 400
-        
-        conn = get_db()
-        cur = conn.cursor(dictionary=True)
-        
-        # Verify student exists
-        cur.execute("SELECT id FROM students WHERE id=%s", (student_id,))
-        if not cur.fetchone():
-            cur.close(); conn.close()
-            return jsonify({"error": "Student not found"}), 404
-        
-        # Grade mapping function
-        def compute_grade_and_points(marks):
-            marks = float(marks or 0)
-            if marks >= 90: return 'O', 10
-            elif marks >= 80: return 'A+', 9
-            elif marks >= 70: return 'A', 8
-            elif marks >= 60: return 'B+', 7
-            elif marks >= 55: return 'B', 6
-            elif marks >= 50: return 'C', 5
-            elif marks >= 45: return 'P', 4
-            else: return 'F', 0
-        
-        computed_subjects = []
-        
-        for subj in subjects_input:
-            course_code = subj.get('course_code')
-            marks = subj.get('marks', 0)
-            
-            if not course_code:
-                continue
-            
-            # Get course info
-            cur.execute("SELECT id, title, credits FROM courses WHERE code=%s", (course_code,))
-            course = cur.fetchone()
-            if not course:
-                cur.close(); conn.close()
-                return jsonify({"error": f"Course {course_code} not found"}), 404
-            
-            grade, grade_point = compute_grade_and_points(marks)
-            
-            # Insert or update grade
-            cur.execute("""
-                INSERT INTO grades (student_id, course_id, marks, grade, semester, grade_point, credits, recorded_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
-                ON DUPLICATE KEY UPDATE
-                marks=%s, grade=%s, grade_point=%s, credits=%s, recorded_at=NOW()
-            """, (student_id, course['id'], marks, grade, sem_no, grade_point, course['credits'],
-                  marks, grade, grade_point, course['credits']))
-            
-            computed_subjects.append({
-                'course_code': course_code,
-                'course_title': course['title'],
-                'marks': marks,
-                'grade': grade,
-                'grade_point': grade_point,
-                'credits': course['credits'],
-                'semester': sem_no
-            })
-        
-        # Calculate semester GPA
-        cur.execute("""
-            SELECT g.marks, g.grade, g.grade_point, c.credits
-            FROM grades g
-            JOIN courses c ON g.course_id = c.id
-            WHERE g.student_id = %s AND g.semester = %s
-        """, (student_id, sem_no))
-        sem_grades = cur.fetchall()
-        
-        total_credits = sum(float(g['credits'] or 3) for g in sem_grades)
-        weighted_points = sum(float(g['grade_point'] or 0) * float(g['credits'] or 3) for g in sem_grades)
-        semester_gpa = weighted_points / total_credits if total_credits > 0 else 0
-        
-        # Calculate overall CGPA
-        cur.execute("""
-            SELECT g.marks, g.grade, g.grade_point, c.credits
-            FROM grades g
-            JOIN courses c ON g.course_id = c.id
-            WHERE g.student_id = %s
-        """, (student_id,))
-        all_grades = cur.fetchall()
-        
-        total_all_credits = sum(float(g['credits'] or 3) for g in all_grades)
-        weighted_all_points = sum(float(g['grade_point'] or 0) * float(g['credits'] or 3) for g in all_grades)
-        cgpa = weighted_all_points / total_all_credits if total_all_credits > 0 else 0
-        
-        conn.commit()
-        cur.close()
-        conn.close()
-        
-        logger.info(f"Auto-computed grades for student {student_id}, semester {sem_no}")
-        
+@app.route('/')
+def serve_root():
+    return send_file(FRONTEND_INDEX)
+
+@app.route('/api/student/<int:user_id>/profile', methods=['GET', 'PUT'])
+@token_required
+def student_profile(current_user, user_id):
+    """Get or update student profile"""
+    # Verify student owns their own profile
+    if current_user.id != user_id:
+        return jsonify({'error': 'Unauthorized'}), 403
+    
+    student = User.query.get(user_id)
+    if not student or student.role != 'student':
+        return jsonify({'error': 'Student not found'}), 404
+    
+    if request.method == 'GET':
         return jsonify({
-            "ok": True,
-            "subjects": computed_subjects,
-            "semester_gpa": round(semester_gpa, 2),
-            "cgpa": round(cgpa, 2),
-            "semester_summary": {
-                "semester": sem_no,
-                "total_credits": total_credits,
-                "gpa": semester_gpa
-            }
-        })
+            'id': student.id,
+            'username': student.username,
+            'full_name': student.full_name,
+            'email': student.email,
+            'phone': student.phone,
+            'dob': student.dob.isoformat() if student.dob else None,
+            'gender': student.gender,
+            'enrollment_number': student.enrollment_number,
+            'roll_number': student.roll_number,
+            'course': student.course,
+            'semester': student.semester,
+            'address': student.address,
+            'city': student.city,
+            'state': student.state,
+            'postal_code': student.postal_code,
+            'country': student.country,
+            'created_at': student.created_at.isoformat()
+        }), 200
+    
+    if request.method == 'PUT':
+        data = request.get_json()
         
-    except Exception as e:
-        logger.error(f"Auto-grades error: {e}")
-        return jsonify({"error": "Internal server error"}), 500
+        # Validate required fields
+        if not data.get('full_name'):
+            return jsonify({'error': 'Full name is required'}), 400
+        if not data.get('email'):
+            return jsonify({'error': 'Email is required'}), 400
+        
+        try:
+            # Update profile fields
+            student.full_name = data.get('full_name', student.full_name)
+            student.email = data.get('email', student.email)
+            student.phone = data.get('phone') or student.phone
+            student.gender = data.get('gender') or student.gender
+            student.dob = data.get('dob') or student.dob
+            student.roll_number = data.get('roll_number') or student.roll_number
+            student.address = data.get('address') or student.address
+            student.city = data.get('city') or student.city
+            student.state = data.get('state') or student.state
+            student.postal_code = data.get('postal_code') or student.postal_code
+            student.country = data.get('country') or student.country
+            
+            db.session.commit()
+            
+            return jsonify({
+                'message': 'Profile updated successfully',
+                'id': student.id,
+                'username': student.username,
+                'full_name': student.full_name,
+                'email': student.email,
+                'phone': student.phone,
+                'dob': student.dob.isoformat() if student.dob else None,
+                'gender': student.gender,
+                'roll_number': student.roll_number,
+                'address': student.address,
+                'city': student.city,
+                'state': student.state,
+                'postal_code': student.postal_code,
+                'country': student.country
+            }), 200
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({'error': 'Failed to update profile: ' + str(e)}), 500
 
 if __name__ == "__main__":
     app.run(debug=True, port=5000, host="0.0.0.0")

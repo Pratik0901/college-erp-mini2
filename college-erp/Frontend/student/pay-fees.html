@@ -1,0 +1,156 @@
+<!-- Fee payment card -->
+<div class="card" style="margin-top:24px;max-width:720px">
+  <h3>Fee Payment</h3>
+
+  <form id="feeForm" style="margin-top:12px">
+    <div class="form-group">
+      <label>Amount (INR)</label>
+      <input type="number" id="feeAmount" min="0" step="0.01" required placeholder="e.g., 1500">
+    </div>
+
+    <div class="form-group">
+      <label>Reason for payment</label>
+      <select id="feeReasonSelect" required>
+        <option value="">-- Select reason --</option>
+        <option value="Tuition Fee">Tuition Fee</option>
+        <option value="Exam Fee">Exam Fee</option>
+        <option value="Library Fine">Library Fine</option>
+        <option value="Hostel">Hostel</option>
+        <option value="Other">Other (specify below)</option>
+      </select>
+    </div>
+
+    <div class="form-group" id="otherReasonGroup" style="display:none">
+      <label>Other - specify</label>
+      <input type="text" id="feeReasonOther" maxlength="200" placeholder="Enter reason">
+    </div>
+
+    <div class="form-group">
+      <label>Preferred payment method (optional)</label>
+      <select id="paymentMethod">
+        <option value="">-- Select --</option>
+        <option value="UPI">UPI</option>
+        <option value="Card">Card</option>
+        <option value="NetBanking">NetBanking</option>
+        <option value="Cash">Cash</option>
+      </select>
+    </div>
+
+    <div style="display:flex;gap:12px;margin-top:12px">
+      <button class="btn" type="submit">Create Fee Request</button>
+      <button class="btn secondary" type="button" id="refreshFeesBtn">Refresh</button>
+    </div>
+  </form>
+
+  <h4 style="margin-top:18px">Your Fees</h4>
+  <div id="studentFeesList" style="margin-top:8px">
+    <p class="muted">Loading...</p>
+  </div>
+</div>
+
+<script>
+  // Ensure the student context function is present or adapt to your auth
+  function ensureStudent() {
+    const token = localStorage.getItem('studentToken');
+    const sStr = localStorage.getItem('studentData');
+    if (!token || !sStr) { window.location.href = 'student-login.html'; return null; }
+    try {
+      const s = JSON.parse(sStr);
+      return { token, student: s };
+    } catch { window.location.href='student-login.html'; return null; }
+  }
+
+  function renderFees(fees) {
+    if (!fees || fees.length === 0) {
+      document.getElementById('studentFeesList').innerHTML = '<div class="muted">No fees found</div>';
+      return;
+    }
+    const html = fees.map(f => {
+      const due = f.due_date ? ('Due: ' + new Date(f.due_date).toLocaleDateString()) : '';
+      const created = f.created_at ? new Date(f.created_at).toLocaleString() : '';
+      return `
+        <div style="padding:10px;border-bottom:1px solid #eee">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <div><strong>₹${parseFloat(f.amount).toFixed(2)}</strong> — <small>${f.reason||'—'}</small></div>
+            <div><span class="small-muted">${f.status}</span></div>
+          </div>
+          <div style="font-size:13px;color:#666;margin-top:6px">
+            ${due} ${f.payment_method ? ' • ' + f.payment_method : ''} ${f.payment_reference ? ' • Ref: ' + f.payment_reference : ''}
+          </div>
+          <div style="font-size:12px;color:#999;margin-top:6px">Created: ${created}</div>
+        </div>
+      `;
+    }).join('');
+    document.getElementById('studentFeesList').innerHTML = html;
+  }
+
+  async function loadStudentFees() {
+    const ctx = ensureStudent(); if (!ctx) return;
+    try {
+      const userId = ctx.student.id;
+      const res = await fetch(`/api/student/${userId}/fees`);
+      const j = await res.json();
+      if (!res.ok) {
+        document.getElementById('studentFeesList').innerHTML = '<div class="muted">Error loading fees</div>';
+        return;
+      }
+      renderFees(j);
+    } catch (err) {
+      console.error(err);
+      document.getElementById('studentFeesList').innerHTML = '<div class="muted">Network error</div>';
+    }
+  }
+
+  document.getElementById('feeReasonSelect').addEventListener('change', (e) => {
+    const val = e.target.value;
+    document.getElementById('otherReasonGroup').style.display = val === 'Other' ? 'block' : 'none';
+    if (val !== 'Other') document.getElementById('feeReasonOther').value = '';
+  });
+
+  document.getElementById('feeForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const ctx = ensureStudent(); if (!ctx) return;
+    const userId = ctx.student.id;
+    const amount = parseFloat(document.getElementById('feeAmount').value || '0');
+    if (!amount || amount <= 0) { alert('Enter a valid amount'); return; }
+
+    let reason = document.getElementById('feeReasonSelect').value;
+    if (!reason) { alert('Choose a reason'); return; }
+    if (reason === 'Other') {
+      const other = document.getElementById('feeReasonOther').value.trim();
+      if (!other) { alert('Please specify the reason'); return; }
+      reason = other;
+    }
+
+    const payment_method = document.getElementById('paymentMethod').value || null;
+
+    try {
+      const res = await fetch(`/api/student/${userId}/pay-fee`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          amount: amount,
+          reason: reason,
+          payment_method: payment_method
+        })
+      });
+      const j = await res.json();
+      if (!res.ok) {
+        alert('Error: ' + (j.error || 'Failed to create fee'));
+        return;
+      }
+      alert('Fee request created — status pending. You can pay via the payment gateway integration later.');
+      document.getElementById('feeForm').reset();
+      document.getElementById('otherReasonGroup').style.display = 'none';
+      loadStudentFees();
+    } catch (err) {
+      console.error(err);
+      alert('Network error');
+    }
+  });
+
+  document.getElementById('refreshFeesBtn').addEventListener('click', loadStudentFees);
+
+  // initial load
+  loadStudentFees();
+</script>

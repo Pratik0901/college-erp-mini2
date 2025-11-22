@@ -311,10 +311,11 @@
                     localStorage.setItem('studentData', JSON.stringify(data.student));
                     window.location.href = 'student-dashboard.html';
                 } else {
-                    errorDiv.textContent = 'Invalid credentials';
+                    errorDiv.textContent = data.message || 'Invalid credentials';
                     errorDiv.style.display = 'block';
                 }
             } catch (err) {
+                console.error('Login error:', err);
                 errorDiv.textContent = 'Login failed. Try again.';
                 errorDiv.style.display = 'block';
             }
