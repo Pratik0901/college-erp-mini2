@@ -843,6 +843,70 @@ def admin_list_staff():
         logger.error(f"List staff error: {e}")
         return jsonify({"error":"Internal server error"}), 500
 
+@app.route('/api/admin/users', methods=['GET'])
+def admin_list_users():
+    """Get users filtered by role"""
+    try:
+        role = request.args.get('role')
+        
+        conn = get_db()
+        cur = conn.cursor(dictionary=True)
+        
+        if role:
+            if role == 'admin':
+                cur.execute("""
+                    SELECT u.id AS user_id, u.username, u.full_name, u.email, u.role, u.created_at
+                    FROM users u
+                    WHERE u.role = 'admin'
+                    ORDER BY u.created_at DESC
+                """)
+            elif role == 'student':
+                cur.execute("""
+                    SELECT u.id AS user_id, u.username, u.full_name, u.email, u.role, u.created_at,
+                           s.id AS student_id, s.roll_no, s.course, s.semester
+                    FROM users u
+                    LEFT JOIN students s ON s.user_id = u.id
+                    WHERE u.role = 'student'
+                    ORDER BY u.created_at DESC
+                """)
+            elif role == 'staff':
+                cur.execute("""
+                    SELECT u.id AS user_id, u.username, u.full_name, u.email, u.role, u.created_at,
+                           s.id AS staff_row_id, s.dept, s.designation
+                    FROM users u
+                    LEFT JOIN staff s ON s.user_id = u.id
+                    WHERE u.role = 'staff'
+                    ORDER BY u.created_at DESC
+                """)
+            else:
+                cur.execute("""
+                    SELECT u.id AS user_id, u.username, u.full_name, u.email, u.role, u.created_at
+                    FROM users u
+                    WHERE u.role = %s
+                    ORDER BY u.created_at DESC
+                """, (role,))
+        else:
+            # Get all users if no role specified
+            cur.execute("""
+                SELECT u.id AS user_id, u.username, u.full_name, u.email, u.role, u.created_at
+                FROM users u
+                ORDER BY u.created_at DESC
+            """)
+        
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+        
+        # Format datetime objects
+        for row in rows:
+            if row.get('created_at'):
+                row['created_at'] = row['created_at'].isoformat()
+        
+        return jsonify(rows)
+    except Exception as e:
+        logger.error(f"List users error: {e}")
+        return jsonify({"error": "Internal server error"}), 500
+
 @app.route('/api/admin/user', methods=['POST'])
 def add_user():
     try:
@@ -850,39 +914,83 @@ def add_user():
         required_fields = ['username', 'password', 'role', 'full_name', 'email']
         if not body or not all(body.get(f) for f in required_fields):
             return jsonify({"error": "All required fields must be provided"}), 400
-        username = body['username']; password_hash = bcrypt.hash(body['password'])
-        role = body['role']; full_name = body['full_name']; email = body['email']
-        conn = get_db(); cur = conn.cursor()
+        
+        username = body['username']
+        password_hash = bcrypt.hash(body['password'])
+        role = body['role']
+        full_name = body['full_name']
+        email = body['email']
+        
+        conn = get_db()
+        cur = conn.cursor()
+        
+        # Insert into users table
         cur.execute("INSERT INTO users (username, password_hash, role, full_name, email) VALUES (%s,%s,%s,%s,%s)",
                     (username, password_hash, role, full_name, email))
         user_id = cur.lastrowid
 
+        # Insert into role-specific tables
         if role == 'student':
-            roll_no = body.get('roll_no'); course = body.get('course'); semester = body.get('semester')
+            # Defensive trimming
+            roll_no = (body.get('roll_no') or '').strip()
+            course = (body.get('course') or '').strip()
+            semester = body.get('semester')
+
             if not roll_no or not course or semester is None:
                 conn.rollback(); cur.close(); conn.close()
-                return jsonify({"error":"Student fields required"}), 400
-            cur.execute(
-                "INSERT INTO students (user_id, username, password_hash, roll_no, course, semester, full_name, email) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
-                (user_id, username, password_hash, roll_no, course, semester, full_name, email)
-            )
-        elif role == 'staff':
-            dept = body.get('dept'); designation = body.get('designation')
-            if not dept or not designation:
+                return jsonify({"error": "Student fields (roll_no, course, semester) are required"}), 400
+
+            username_clean = username.strip()
+            email_clean = email.strip()
+
+            # Exclude current inserted user from duplicate check
+            cur.execute("SELECT id FROM users WHERE (username=%s OR email=%s) AND id<>%s LIMIT 1",
+                        (username_clean, email_clean, user_id))
+            if cur.fetchone():
                 conn.rollback(); cur.close(); conn.close()
-                return jsonify({"error":"Staff fields required"}), 400
+                return jsonify({"error": "Username or email already exists"}), 409
+
+            cur.execute("SELECT id FROM students WHERE roll_no=%s LIMIT 1", (roll_no,))
+            if cur.fetchone():
+                conn.rollback(); cur.close(); conn.close()
+                return jsonify({"error": "Student roll number already exists"}), 409
+
+            try:
+                # Minimal insert; add columns if they exist in your schema
+                cur.execute(
+                    "INSERT INTO students (user_id, roll_no, course, semester) VALUES (%s,%s,%s,%s)",
+                    (user_id, roll_no, course, int(semester))
+                )
+            except mysql.connector.IntegrityError as ie:
+                conn.rollback(); cur.close(); conn.close()
+                logger.warning(f"Integrity error when inserting student row: {ie}")
+                return jsonify({"error": "Database integrity error when creating student"}), 409
+
+        elif role == 'staff':
+            dept = body.get('dept')
+            designation = body.get('designation')
+            if not dept or not designation:
+                conn.rollback()
+                cur.close()
+                conn.close()
+                return jsonify({"error": "Staff fields (dept, designation) are required"}), 400
+            
+            # Insert into staff table
             cur.execute("INSERT INTO staff (user_id, dept, designation) VALUES (%s,%s,%s)",
                         (user_id, dept, designation))
 
-        conn.commit(); cur.close(); conn.close()
-        logger.info(f"User {username} added successfully")
-        return jsonify({"ok": True, "user_id": user_id})
+        conn.commit()
+        cur.close()
+        conn.close()
+        logger.info(f"User {username} added successfully with role {role}")
+        return jsonify({"ok": True, "user_id": user_id, "message": f"{role.title()} created successfully"})
+        
     except mysql.connector.IntegrityError as e:
         logger.warning(f"Integrity error adding user: {e}")
         return jsonify({"error": "Username or email already exists"}), 409
     except Exception as e:
         logger.error(f"Add user error: {e}")
-        return jsonify({"error": "Internal server error"}), 500
+        return jsonify({"error": f"Internal server error: {str(e)}"}), 500
 
 @app.route('/api/admin/courses', methods=['GET'])
 def get_courses():
