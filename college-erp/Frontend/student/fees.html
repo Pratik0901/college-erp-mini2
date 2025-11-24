@@ -5,6 +5,8 @@
   <title>Fee Portal</title>
   <link rel="stylesheet" href="../common/styles.css">
   <meta name="viewport" content="width=device-width,initial-scale=1">
+  <!-- Add jsPDF library -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <style>
     body {
       font-family: "Segoe UI", Roboto, system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
@@ -156,6 +158,26 @@
       background: #218838;
     }
     .pay-btn:disabled {
+      background: #6c757d;
+      cursor: not-allowed;
+    }
+    .download-btn {
+      background: #17a2b8;
+      color: white;
+      padding: 6px 12px;
+      border: none;
+      border-radius: 4px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      margin-left: 8px;
+    }
+    
+    .download-btn:hover {
+      background: #138496;
+    }
+    
+    .download-btn:disabled {
       background: #6c757d;
       cursor: not-allowed;
     }
@@ -398,6 +420,10 @@
         const payButton = f.status === 'pending' ? 
           `<button class="pay-btn" onclick="payFeeUPI(${f.id}, ${f.amount}, '${f.reason || 'Fee'}')">💳 Pay Now</button>` : '';
         
+        // Add Download button for paid fees
+        const downloadButton = f.status === 'paid' && f.payment_reference ? 
+          `<button class="download-btn" onclick="downloadPaidReceipt(${f.id}, '${f.payment_reference}', ${f.amount}, '${f.reason || 'Fee'}', '${f.created_at}')">📄 Download</button>` : '';
+        
         return `
           <div class="fees-list-item">
             <div class="fees-top">
@@ -405,6 +431,7 @@
               <div>
                 <span class="status-badge ${statusClass}">${(f.status || 'pending').toUpperCase()}</span>
                 ${payButton}
+                ${downloadButton}
               </div>
             </div>
             <div class="small-muted">
@@ -524,166 +551,145 @@
         return;
       }
 
-      const receiptHtml = generateReceiptHtml(currentPaymentData);
-      
-      // Create a blob with the HTML content
-      const blob = new Blob([receiptHtml], { type: 'text/html' });
-      const url = window.URL.createObjectURL(blob);
-      
-      // Create a temporary link to download the file
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `Receipt_${currentPaymentData.payment_reference}.html`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      
-      // Clean up the URL
-      window.URL.revokeObjectURL(url);
-      
-      // Also open in new window for immediate viewing/printing
-      const printWindow = window.open('', '_blank');
-      printWindow.document.write(receiptHtml);
-      printWindow.document.close();
-    }
+      try {
+        // Initialize jsPDF
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF();
 
-    function generateReceiptHtml(paymentData) {
-      return `
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <title>Payment Receipt - ${paymentData.payment_reference}</title>
-          <style>
-            body { 
-              font-family: Arial, sans-serif; 
-              padding: 30px; 
-              max-width: 600px; 
-              margin: 0 auto; 
-              line-height: 1.6;
-            }
-            .receipt-header { 
-              text-align: center; 
-              border-bottom: 3px solid #2b6cb0; 
-              padding-bottom: 20px; 
-              margin-bottom: 30px; 
-            }
-            .receipt-header h1 {
-              color: #2b6cb0;
-              margin: 0 0 10px 0;
-              font-size: 28px;
-            }
-            .receipt-header p {
-              color: #666;
-              margin: 5px 0;
-            }
-            .receipt-table { 
-              width: 100%; 
-              border-collapse: collapse; 
-              margin: 30px 0; 
-              background: #fff;
-            }
-            .receipt-table tr:nth-child(even) {
-              background: #f9f9f9;
-            }
-            .receipt-table td { 
-              padding: 12px 15px; 
-              border-bottom: 1px solid #ddd; 
-              vertical-align: top;
-            }
-            .label { 
-              font-weight: 700; 
-              color: #333;
-              width: 40%; 
-            }
-            .value {
-              color: #666;
-            }
-            .amount-row {
-              background: #e8f4f8 !important;
-              font-weight: bold;
-            }
-            .amount-row .value {
-              color: #2b6cb0;
-              font-size: 18px;
-            }
-            .receipt-footer { 
-              text-align: center; 
-              margin-top: 40px; 
-              padding-top: 20px; 
-              border-top: 1px solid #ddd; 
-              color: #888;
-              font-size: 14px;
-            }
-            .success-badge {
-              background: #28a745;
-              color: white;
-              padding: 8px 16px;
-              border-radius: 20px;
-              font-weight: bold;
-              display: inline-block;
-              margin: 10px 0;
-            }
-            @media print { 
-              body { padding: 20px; }
-              .no-print { display: none !important; }
-            }
-          </style>
-        </head>
-        <body>
-          <div class="receipt-header">
-            <h1>🧾 Payment Receipt</h1>
-            <p>College Fee Management System</p>
-            <div class="success-badge">✅ PAYMENT SUCCESSFUL</div>
-          </div>
+        // Helper function to safely convert text
+        function safeText(text) {
+          if (!text) return '-';
+          return String(text).replace(/[^\x20-\x7E]/g, '');
+        }
+
+        // Helper function to split text if too long
+        function splitText(text, maxWidth) {
+          return doc.splitTextToSize(safeText(text), maxWidth);
+        }
+
+        // Set font
+        doc.setFont('helvetica');
+
+        // Header
+        doc.setFontSize(20);
+        doc.setTextColor(43, 108, 176);
+        doc.text('Payment Receipt', 105, 30, { align: 'center' });
+
+        doc.setFontSize(12);
+        doc.setTextColor(102, 102, 102);
+        doc.text('College Fee Management System', 105, 40, { align: 'center' });
+
+        // Success badge
+        doc.setFillColor(40, 167, 69);
+        doc.roundedRect(70, 50, 70, 12, 3, 3, 'F');
+        doc.setTextColor(255, 255, 255);
+        doc.setFontSize(10);
+        doc.text('PAYMENT SUCCESSFUL', 105, 58, { align: 'center' });
+
+        // Reset text color
+        doc.setTextColor(0, 0, 0);
+        doc.setFontSize(11);
+
+        // Receipt details
+        const leftCol = 30;
+        const rightCol = 80;
+        const maxWidth = 110;
+        let currentY = 80;
+
+        // Helper to add row with proper wrapping
+        function addRow(label, value, isAmount = false) {
+          doc.setFont('helvetica', 'bold');
+          doc.text(safeText(label), leftCol, currentY);
           
-          <table class="receipt-table">
-            <tr>
-              <td class="label">Receipt Number:</td>
-              <td class="value">${paymentData.payment_reference}</td>
-            </tr>
-            <tr>
-              <td class="label">Student Name:</td>
-              <td class="value">${paymentData.student_name}</td>
-            </tr>
-            <tr>
-              <td class="label">Roll Number:</td>
-              <td class="value">${paymentData.student_roll}</td>
-            </tr>
-            <tr class="amount-row">
-              <td class="label">Amount Paid:</td>
-              <td class="value">₹${paymentData.amount.toFixed(2)}</td>
-            </tr>
-            <tr>
-              <td class="label">Purpose:</td>
-              <td class="value">${paymentData.reason}</td>
-            </tr>
-            <tr>
-              <td class="label">Payment Method:</td>
-              <td class="value">UPI</td>
-            </tr>
-            <tr>
-              <td class="label">Transaction Reference:</td>
-              <td class="value">${paymentData.payment_reference}</td>
-            </tr>
-            <tr>
-              <td class="label">Payment Date & Time:</td>
-              <td class="value">${new Date(paymentData.paid_at).toLocaleString()}</td>
-            </tr>
-            <tr>
-              <td class="label">Status:</td>
-              <td class="value" style="color: #28a745; font-weight: bold;">PAID</td>
-            </tr>
-          </table>
-          
-          <div class="receipt-footer">
-            <p><strong>Thank you for your payment!</strong></p>
-            <p>This is a computer-generated receipt and does not require a signature.</p>
-            <p>For any queries, please contact the accounts department.</p>
-            <p>Generated on: ${new Date().toLocaleString()}</p>
-          </div>
-        </body>
-        </html>
-      `;
+          doc.setFont('helvetica', 'normal');
+          if (isAmount) {
+            doc.setTextColor(43, 108, 176);
+            doc.setFontSize(14);
+            doc.text(safeText(value), rightCol, currentY);
+            doc.setFontSize(11);
+            doc.setTextColor(0, 0, 0);
+            currentY += 12;
+          } else {
+            const lines = splitText(value, maxWidth);
+            doc.text(lines, rightCol, currentY);
+            currentY += (lines.length * 6) + 6;
+          }
+        }
+
+        // Add receipt data with safe text conversion
+        addRow('Receipt Number:', safeText(currentPaymentData.payment_reference));
+        addRow('Student Name:', safeText(currentPaymentData.student_name));
+        addRow('Roll Number:', safeText(currentPaymentData.student_roll));
+        addRow('Amount Paid:', 'Rs ' + parseFloat(currentPaymentData.amount).toFixed(2), true);
+        addRow('Purpose:', safeText(currentPaymentData.reason));
+        addRow('Payment Method:', 'UPI');
+        addRow('Transaction Ref:', safeText(currentPaymentData.payment_reference));
+        
+        const dateStr = new Date(currentPaymentData.paid_at).toLocaleDateString('en-IN') + ' ' + 
+                       new Date(currentPaymentData.paid_at).toLocaleTimeString('en-IN');
+        addRow('Payment Date:', dateStr);
+        
+        // Status
+        doc.setFont('helvetica', 'bold');
+        doc.text('Status:', leftCol, currentY);
+        doc.setTextColor(40, 167, 69);
+        doc.text('PAID', rightCol, currentY);
+        doc.setTextColor(0, 0, 0);
+        currentY += 15;
+
+        // Line separator
+        doc.setDrawColor(221, 221, 221);
+        doc.line(30, currentY, 180, currentY);
+        currentY += 15;
+
+        // Footer
+        doc.setFontSize(10);
+        doc.setFont('helvetica', 'bold');
+        doc.text('Thank you for your payment!', 105, currentY, { align: 'center' });
+        currentY += 8;
+        
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(9);
+        doc.setTextColor(102, 102, 102);
+        
+        const footerLines = splitText('This is a computer-generated receipt and does not require a signature.', 150);
+        doc.text(footerLines, 105, currentY, { align: 'center' });
+        currentY += footerLines.length * 5 + 5;
+        
+        doc.text('For queries, contact accounts department', 105, currentY, { align: 'center' });
+        currentY += 5;
+        doc.text('Email: accounts@college.edu', 105, currentY, { align: 'center' });
+
+        // Verification
+        currentY += 15;
+        doc.setDrawColor(221, 221, 221);
+        doc.line(30, currentY, 180, currentY);
+        currentY += 10;
+        
+        doc.setTextColor(0, 0, 0);
+        doc.setFontSize(8);
+        const genDate = new Date().toLocaleDateString('en-IN') + ' ' + new Date().toLocaleTimeString('en-IN');
+        doc.text('Generated: ' + genDate, 105, currentY, { align: 'center' });
+        currentY += 5;
+        doc.text('Valid for official purposes', 105, currentY, { align: 'center' });
+
+        // Verification code
+        const verCode = String(currentPaymentData.payment_reference).slice(-6);
+        doc.setFontSize(9);
+        doc.text('Verification: ' + verCode, 105, currentY + 8, { align: 'center' });
+
+        // Save PDF
+        const fileName = 'Receipt_' + safeText(currentPaymentData.payment_reference) + '.pdf';
+        doc.save(fileName);
+
+        setTimeout(() => {
+          alert('Receipt downloaded successfully!');
+        }, 500);
+
+      } catch (error) {
+        console.error('PDF Error:', error);
+        alert('Error generating PDF. Please try again.');
+      }
     }
 
     async function payFeeUPI(feeId, amount, reason) {
@@ -730,6 +736,181 @@
     }
 
     window.addEventListener('load', loadStudentFees);
+
+    // Function to download receipt for already paid fees
+    async function downloadPaidReceipt(feeId, paymentRef, amount, reason, createdAt) {
+      const downloadBtn = event.target;
+      downloadBtn.disabled = true;
+      downloadBtn.textContent = 'Loading...';
+      
+      try {
+        // Get student info for receipt
+        const ctx = ensureStudent();
+        if (!ctx) return;
+        
+        // Create receipt data object
+        const receiptData = {
+          fee_id: feeId,
+          payment_reference: paymentRef,
+          amount: amount,
+          reason: reason,
+          student_name: ctx.student.full_name || 'Student',
+          student_roll: ctx.student.enrollment_number || 'N/A',
+          paid_at: createdAt || new Date().toISOString()
+        };
+        
+        // Generate and download PDF
+        generatePaidReceiptPDF(receiptData);
+        
+      } catch (error) {
+        console.error('Download error:', error);
+        alert('Error downloading receipt. Please try again.');
+      } finally {
+        downloadBtn.disabled = false;
+        downloadBtn.textContent = '📄 Download';
+      }
+    }
+
+    // Function to generate PDF for paid receipts
+    function generatePaidReceiptPDF(receiptData) {
+      try {
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF();
+
+        // Helper function to safely convert text
+        function safeText(text) {
+          if (!text) return '-';
+          return String(text).replace(/[^\x20-\x7E]/g, '');
+        }
+
+        // Helper function to split text if too long
+        function splitText(text, maxWidth) {
+          return doc.splitTextToSize(safeText(text), maxWidth);
+        }
+
+        doc.setFont('helvetica');
+
+        // Header
+        doc.setFontSize(20);
+        doc.setTextColor(43, 108, 176);
+        doc.text('Fee Payment Receipt', 105, 30, { align: 'center' });
+
+        doc.setFontSize(12);
+        doc.setTextColor(102, 102, 102);
+        doc.text('College Fee Management System', 105, 40, { align: 'center' });
+
+        // Success badge
+        doc.setFillColor(40, 167, 69);
+        doc.roundedRect(70, 50, 70, 12, 3, 3, 'F');
+        doc.setTextColor(255, 255, 255);
+        doc.setFontSize(10);
+        doc.text('PAYMENT COMPLETED', 105, 58, { align: 'center' });
+
+        // Reset
+        doc.setTextColor(0, 0, 0);
+        doc.setFontSize(11);
+
+        const leftCol = 30;
+        const rightCol = 80;
+        const maxWidth = 110;
+        let currentY = 80;
+
+        // Helper to add row
+        function addRow(label, value, isAmount = false) {
+          doc.setFont('helvetica', 'bold');
+          doc.text(safeText(label), leftCol, currentY);
+          
+          doc.setFont('helvetica', 'normal');
+          if (isAmount) {
+            doc.setTextColor(43, 108, 176);
+            doc.setFontSize(14);
+            doc.text(safeText(value), rightCol, currentY);
+            doc.setFontSize(11);
+            doc.setTextColor(0, 0, 0);
+            currentY += 12;
+          } else {
+            const lines = splitText(value, maxWidth);
+            doc.text(lines, rightCol, currentY);
+            currentY += (lines.length * 6) + 6;
+          }
+        }
+
+        // Add receipt data
+        addRow('Receipt Number:', safeText(receiptData.payment_reference));
+        addRow('Fee ID:', String(receiptData.fee_id));
+        addRow('Student Name:', safeText(receiptData.student_name));
+        addRow('Roll Number:', safeText(receiptData.student_roll));
+        addRow('Amount Paid:', 'Rs ' + parseFloat(receiptData.amount).toFixed(2), true);
+        addRow('Purpose:', safeText(receiptData.reason));
+        addRow('Payment Method:', 'UPI');
+        addRow('Transaction Ref:', safeText(receiptData.payment_reference));
+        
+        const dateStr = new Date(receiptData.paid_at).toLocaleDateString('en-IN') + ' ' + 
+                       new Date(receiptData.paid_at).toLocaleTimeString('en-IN');
+        addRow('Payment Date:', dateStr);
+        
+        // Status
+        doc.setFont('helvetica', 'bold');
+        doc.text('Status:', leftCol, currentY);
+        doc.setTextColor(40, 167, 69);
+        doc.text('PAID', rightCol, currentY);
+        doc.setTextColor(0, 0, 0);
+        currentY += 15;
+
+        // Line separator
+        doc.setDrawColor(221, 221, 221);
+        doc.line(30, currentY, 180, currentY);
+        currentY += 15;
+
+        // Footer
+        doc.setFontSize(10);
+        doc.setFont('helvetica', 'bold');
+        doc.text('Thank you for your payment!', 105, currentY, { align: 'center' });
+        currentY += 8;
+        
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(9);
+        doc.setTextColor(102, 102, 102);
+        
+        const footerLines = splitText('This is a computer-generated receipt and does not require a signature.', 150);
+        doc.text(footerLines, 105, currentY, { align: 'center' });
+        currentY += footerLines.length * 5 + 5;
+        
+        doc.text('For queries, contact accounts department', 105, currentY, { align: 'center' });
+        currentY += 5;
+        doc.text('Email: accounts@college.edu', 105, currentY, { align: 'center' });
+
+        // Verification
+        currentY += 15;
+        doc.setDrawColor(221, 221, 221);
+        doc.line(30, currentY, 180, currentY);
+        currentY += 10;
+        
+        doc.setTextColor(0, 0, 0);
+        doc.setFontSize(8);
+        const genDate = new Date().toLocaleDateString('en-IN') + ' ' + new Date().toLocaleTimeString('en-IN');
+        doc.text('Downloaded: ' + genDate, 105, currentY, { align: 'center' });
+        currentY += 5;
+        doc.text('Valid for official purposes', 105, currentY, { align: 'center' });
+
+        // Verification code
+        const verCode = String(receiptData.payment_reference).slice(-6);
+        doc.setFontSize(9);
+        doc.text('Verification: ' + verCode, 105, currentY + 8, { align: 'center' });
+
+        // Save PDF
+        const fileName = 'Receipt_' + safeText(receiptData.payment_reference) + '.pdf';
+        doc.save(fileName);
+
+        setTimeout(() => {
+          alert('Receipt downloaded successfully!');
+        }, 500);
+
+      } catch (error) {
+        console.error('PDF Error:', error);
+        alert('Error generating PDF. Please try again.');
+      }
+    }
   </script>
 </body>
 </html>
