@@ -144,3 +144,6 @@ CREATE INDEX idx_users_role ON users(role);
 DELETE FROM users;
 INSERT INTO users (username, password_hash, role, full_name, email) VALUES
 ('admin', '$2b$12$KIXxENohs4B9lnZ/8wQGteW/6Z9YuqbWtaXDpUe1koRaSPaQUWf6e', 'admin', 'System Administrator', 'admin@college.edu');
+
+-- Optional: ensure grade_point column exists
+ALTER TABLE grades ADD COLUMN IF NOT EXISTS grade_point INT NULL;

@@ -620,99 +620,171 @@ def mark_attendance():
 
 @app.route('/api/staff/grades/auto', methods=['POST'])
 def staff_grades_auto():
+    """
+    Robust single-file solution:
+    - creates the grades table if missing
+    - ensures required columns and unique index exist
+    - inserts/updates grades (ON DUPLICATE KEY)
+    - computes semester GPA and overall CGPA
+    """
     try:
         body = request.json or {}
         student_id = body.get('student_id')
-        sem_no = body.get('sem_no', 1)
+        sem_no = int(body.get('sem_no', 1))
         subjects_input = body.get('subjects', [])
-        
+
         if not student_id or not subjects_input:
             return jsonify({"error": "student_id and subjects required"}), 400
-        
+
         conn = get_db()
         cur = conn.cursor(dictionary=True)
-        
-        cur.execute("SELECT id FROM students WHERE id=%s", (student_id,))
+
+        # --- ensure grades table exists with sensible schema (idempotent) ---
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS grades (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                student_id INT NOT NULL,
+                course_id INT NOT NULL,
+                marks DECIMAL(7,2) DEFAULT 0,
+                grade VARCHAR(16) DEFAULT NULL,
+                semester INT DEFAULT 1,
+                grade_point DECIMAL(5,2) DEFAULT 0,
+                credits INT DEFAULT 3,
+                recorded_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+                created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB
+        """)
+        conn.commit()
+
+        # Ensure required columns exist (safe ALTER TABLE ADD COLUMN IF NOT EXISTS)
+        try:
+            cur.execute("ALTER TABLE grades ADD COLUMN IF NOT EXISTS grade_point DECIMAL(5,2) DEFAULT 0")
+            cur.execute("ALTER TABLE grades ADD COLUMN IF NOT EXISTS credits INT DEFAULT 3")
+            cur.execute("ALTER TABLE grades ADD COLUMN IF NOT EXISTS recorded_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP")
+            conn.commit()
+        except Exception as e:
+            # MySQL versions < 8.0 don't support "IF NOT EXISTS" for ALTER TABLE
+            # Try individual column additions with error handling
+            try:
+                cur.execute("ALTER TABLE grades ADD COLUMN grade_point DECIMAL(5,2) DEFAULT 0")
+            except:
+                pass  # Column already exists
+            try:
+                cur.execute("ALTER TABLE grades ADD COLUMN credits INT DEFAULT 3")
+            except:
+                pass  # Column already exists
+            try:
+                cur.execute("ALTER TABLE grades ADD COLUMN recorded_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP")
+            except:
+                pass  # Column already exists
+            conn.commit()
+
+        # Ensure unique index exists for upsert key (student_id, course_id, semester)
+        cur.execute("""
+            SELECT COUNT(*) AS cnt
+            FROM INFORMATION_SCHEMA.STATISTICS
+            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'grades' AND INDEX_NAME = 'uq_student_course_semester'
+        """)
+        idx = cur.fetchone()
+        if not idx or idx.get('cnt', 0) == 0:
+            try:
+                cur.execute("ALTER TABLE grades ADD UNIQUE KEY uq_student_course_semester (student_id, course_id, semester)")
+                conn.commit()
+            except Exception as e:
+                # if it fails (rare), continue; upsert behavior may be affected
+                logger.warning(f"Could not add unique index (maybe already present): {e}")
+
+        # verify student exists (students.id)
+        cur.execute("SELECT id FROM students WHERE id=%s LIMIT 1", (student_id,))
         if not cur.fetchone():
             cur.close(); conn.close()
             return jsonify({"error": "Student not found"}), 404
-        
+
+        # helper: compute grade and points
         def compute_grade_and_points(marks):
-            marks = float(marks or 0)
-            if marks >= 90: return 'O', 10
-            elif marks >= 80: return 'A+', 9
-            elif marks >= 70: return 'A', 8
-            elif marks >= 60: return 'B+', 7
-            elif marks >= 55: return 'B', 6
-            elif marks >= 50: return 'C', 5
-            elif marks >= 45: return 'P', 4
+            try:
+                m = float(marks or 0)
+            except Exception:
+                m = 0.0
+            if m >= 90: return 'O', 10
+            elif m >= 80: return 'A+', 9
+            elif m >= 70: return 'A', 8
+            elif m >= 60: return 'B+', 7
+            elif m >= 55: return 'B', 6
+            elif m >= 50: return 'C', 5
+            elif m >= 45: return 'P', 4
             else: return 'F', 0
-        
+
         computed_subjects = []
-        
+
         for subj in subjects_input:
-            course_code = subj.get('course_code')
+            course_code = (subj.get('course_code') or '').strip()
             marks = subj.get('marks', 0)
-            
+
             if not course_code:
                 continue
-            
-            cur.execute("SELECT id, title, credits FROM courses WHERE code=%s", (course_code,))
+
+            cur.execute("SELECT id, title, credits FROM courses WHERE code=%s LIMIT 1", (course_code,))
             course = cur.fetchone()
             if not course:
                 cur.close(); conn.close()
                 return jsonify({"error": f"Course {course_code} not found"}), 404
-            
+
             grade, grade_point = compute_grade_and_points(marks)
-            
+            credits = int(course.get('credits') or 3)
+
+            # upsert row using the unique key (student_id, course_id, semester)
             cur.execute("""
                 INSERT INTO grades (student_id, course_id, marks, grade, semester, grade_point, credits, recorded_at)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
                 ON DUPLICATE KEY UPDATE
-                marks=%s, grade=%s, grade_point=%s, credits=%s, recorded_at=NOW()
-            """, (student_id, course['id'], marks, grade, sem_no, grade_point, course['credits'],
-                  marks, grade, grade_point, course['credits']))
-            
+                  marks = VALUES(marks),
+                  grade = VALUES(grade),
+                  grade_point = VALUES(grade_point),
+                  credits = VALUES(credits),
+                  recorded_at = NOW()
+            """, (student_id, course['id'], float(marks), grade, sem_no, grade_point, credits))
+
             computed_subjects.append({
                 'course_code': course_code,
                 'course_title': course['title'],
-                'marks': marks,
+                'marks': float(marks),
                 'grade': grade,
                 'grade_point': grade_point,
-                'credits': course['credits'],
+                'credits': credits,
                 'semester': sem_no
             })
-        
+
+        # compute semester GPA
         cur.execute("""
-            SELECT g.marks, g.grade, g.grade_point, c.credits
+            SELECT COALESCE(g.grade_point,0) AS gp, COALESCE(c.credits, g.credits, 3) AS credits
             FROM grades g
             JOIN courses c ON g.course_id = c.id
             WHERE g.student_id = %s AND g.semester = %s
         """, (student_id, sem_no))
-        sem_grades = cur.fetchall()
-        
-        total_credits = sum(float(g['credits'] or 3) for g in sem_grades)
-        weighted_points = sum(float(g['grade_point'] or 0) * float(g['credits'] or 3) for g in sem_grades)
-        semester_gpa = weighted_points / total_credits if total_credits > 0 else 0
-        
+        sem_rows = cur.fetchall()
+        total_credits = sum(float(r['credits'] or 3) for r in sem_rows)
+        weighted_points = sum(float(r['gp'] or 0) * float(r['credits'] or 3) for r in sem_rows)
+        semester_gpa = (weighted_points / total_credits) if total_credits > 0 else 0.0
+
+        # compute CGPA across all semesters
         cur.execute("""
-            SELECT g.marks, g.grade, g.grade_point, c.credits
+            SELECT COALESCE(g.grade_point,0) AS gp, COALESCE(c.credits, g.credits, 3) AS credits
             FROM grades g
             JOIN courses c ON g.course_id = c.id
             WHERE g.student_id = %s
         """, (student_id,))
-        all_grades = cur.fetchall()
-        
-        total_all_credits = sum(float(g['credits'] or 3) for g in all_grades)
-        weighted_all_points = sum(float(g['grade_point'] or 0) * float(g['credits'] or 3) for g in all_grades)
-        cgpa = weighted_all_points / total_all_credits if total_all_credits > 0 else 0
-        
+        all_rows = cur.fetchall()
+        total_all_credits = sum(float(r['credits'] or 3) for r in all_rows)
+        weighted_all = sum(float(r['gp'] or 0) * float(r['credits'] or 3) for r in all_rows)
+        cgpa = (weighted_all / total_all_credits) if total_all_credits > 0 else 0.0
+
         conn.commit()
-        cur.close()
-        conn.close()
-        
-        logger.info(f"Auto-computed grades for student {student_id}, semester {sem_no}")
-        
+        cur.close(); conn.close()
+
+        logger.info(f"Auto-computed {len(computed_subjects)} grades for student {student_id}, semester {sem_no}")
+
         return jsonify({
             "ok": True,
             "subjects": computed_subjects,
@@ -720,8 +792,8 @@ def staff_grades_auto():
             "cgpa": round(cgpa, 2)
         })
     except Exception as e:
-        logger.error(f"Auto-grades error: {e}")
-        return jsonify({"error": "Internal server error"}), 500
+        logger.error(f"Auto-grades error: {e}", exc_info=True)
+        return jsonify({"error": "Internal server error", "details": str(e)}), 500
 
 @app.route('/api/staff/upload-material', methods=['POST'])
 def upload_material():
