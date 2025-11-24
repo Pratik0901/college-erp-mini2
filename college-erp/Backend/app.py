@@ -11,6 +11,9 @@ import os
 import logging
 from pathlib import Path
 import time
+import random
+import secrets
+from datetime import date, timedelta
 
 app = Flask(__name__, static_folder="../Frontend", static_url_path="/")
 app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+mysqlconnector://root:@127.0.0.1/college_erp'
@@ -522,18 +525,41 @@ def get_student_fees(user_id):
 
 @app.route('/api/student/<int:user_id>/pay-fee', methods=['POST'])
 def student_pay_fee(user_id):
+    """
+    Creates a fee record. If payment_method == 'UPI', returns a dummy UPI deep link
+    and payment_id so the frontend can display a QR/link and poll status.
+    """
     try:
         body = request.get_json() or {}
         amount = body.get('amount')
         reason = (body.get('reason') or '').strip()
         due_date = body.get('due_date')
-        payment_method = body.get('payment_method')
+        payment_method = (body.get('payment_method') or '').strip() or None
 
         if amount is None:
             return jsonify({"error": "amount required"}), 400
 
+        # Create fees table if it doesn't exist (safe to call repeatedly)
         conn = get_db()
         cur = conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS fees (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                student_id INT NOT NULL,
+                amount DECIMAL(10,2) NOT NULL,
+                reason VARCHAR(255),
+                due_date DATE NULL,
+                status VARCHAR(20) DEFAULT 'pending',
+                payment_method VARCHAR(50),
+                payment_reference VARCHAR(255),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE
+            ) ENGINE=InnoDB
+        """)
+        conn.commit()
+
+        # Find student row id
         cur.execute("SELECT id FROM students WHERE user_id=%s", (user_id,))
         s = cur.fetchone()
         if not s:
@@ -541,19 +567,114 @@ def student_pay_fee(user_id):
             return jsonify({"error": "Student not found"}), 404
         sid = s[0]
 
+        # Insert fee record as pending
         cur.execute("""
             INSERT INTO fees (student_id, amount, reason, due_date, payment_method, status)
             VALUES (%s,%s,%s,%s,%s,%s)
         """, (sid, float(amount), reason or None, due_date, payment_method, 'pending'))
-
         conn.commit()
         new_id = cur.lastrowid
+
+        # If UPI, return a dummy UPI deep-link and payment_id the front-end can use
+        if payment_method and payment_method.upper() == 'UPI':
+            # Create dummy UPI id and link (NOT real UPI — just for testing)
+            payment_id = f"UPI-{new_id}-{int(time.time())}"
+            # A simple UPI deep link (mock). Real apps would use payee vpa, amount, txn note, etc.
+            upi_deep_link = f"upi://pay?pa=merchant@upi&pn=CollegeFees&am={float(amount):.2f}&tn={secure_filename(reason or 'Fee')}&tr={payment_id}"
+
+            # Save the payment_id into payment_reference temporarily (optional)
+            cur.execute("UPDATE fees SET payment_reference=%s WHERE id=%s", (payment_id, new_id))
+            conn.commit()
+            cur.close(); conn.close()
+
+            return jsonify({
+                "ok": True,
+                "fee_id": new_id,
+                "payment_method": "UPI",
+                "payment_id": payment_id,
+                "upi_link": upi_deep_link,
+                "message": "UPI payment created (dummy). Poll /api/fee/<fee_id>/status to check result."
+            }), 201
+
+        # Non-UPI flow: return created record info (status pending — manual/offline payment)
         cur.close(); conn.close()
-        logger.info(f"Fee record created for student {user_id} id={new_id} reason={reason}")
-        return jsonify({"ok": True, "fee_id": new_id})
+        return jsonify({"ok": True, "fee_id": new_id, "message": "Fee record created (pending)"}), 201
+
     except Exception as e:
-        logger.error(f"student_pay_fee error for {user_id}: {e}")
-        return jsonify({"error": "Internal server error"}), 500
+        logger.error(f"student_pay_fee error for {user_id}: {e}", exc_info=True)
+        return jsonify({"error": "Internal server error", "details": str(e)}), 500
+
+@app.route('/api/fee/<int:fee_id>/pay-upi', methods=['POST'])
+def pay_fee_upi(fee_id):
+    """
+    Direct UPI payment for existing fee record.
+    Generates dummy UPI payment and immediately marks as paid for demo purposes.
+    """
+    try:
+        conn = get_db()
+        cur = conn.cursor(dictionary=True)
+        
+        # Get fee details
+        cur.execute("SELECT * FROM fees WHERE id=%s", (fee_id,))
+        fee = cur.fetchone()
+        if not fee:
+            cur.close(); conn.close()
+            return jsonify({"error": "Fee not found"}), 404
+        
+        if fee['status'] == 'paid':
+            cur.close(); conn.close()
+            return jsonify({"error": "Fee already paid"}), 400
+        
+        # Generate dummy payment reference
+        payment_ref = f"UPI{random.randint(100000000000, 999999999999)}"
+        
+        # Check if updated_at column exists, if not use simpler query
+        try:
+            # Try with updated_at column first
+            cur.execute("""
+                UPDATE fees SET status='paid', payment_method='UPI', 
+                               payment_reference=%s, updated_at=NOW() 
+                WHERE id=%s
+            """, (payment_ref, fee_id))
+        except mysql.connector.Error as e:
+            if "Unknown column 'updated_at'" in str(e):
+                # Fallback to simpler query without updated_at
+                cur.execute("""
+                    UPDATE fees SET status='paid', payment_method='UPI', 
+                                   payment_reference=%s 
+                    WHERE id=%s
+                """, (payment_ref, fee_id))
+            else:
+                raise e
+        
+        conn.commit()
+        
+        # Get student details for receipt
+        cur.execute("""
+            SELECT u.id as user_id, u.full_name, u.username, s.roll_no 
+            FROM students s 
+            JOIN users u ON s.user_id = u.id 
+            WHERE s.id = %s
+        """, (fee['student_id'],))
+        student = cur.fetchone()
+        
+        cur.close(); conn.close()
+        
+        return jsonify({
+            "ok": True,
+            "fee_id": fee_id,
+            "payment_reference": payment_ref,
+            "amount": float(fee['amount']),
+            "reason": fee['reason'],
+            "student_name": student['full_name'] if student else 'Unknown',
+            "student_roll": student['roll_no'] if student else 'Unknown',
+            "paid_at": datetime.now().isoformat(),
+            "message": "Payment successful!"
+        })
+        
+    except Exception as e:
+        logger.error(f"pay_fee_upi error for fee {fee_id}: {e}", exc_info=True)
+        return jsonify({"error": "Internal server error", "details": str(e)}), 500
 
 # ============ STAFF ENDPOINTS ============
 @app.route('/api/staff/<int:user_id>/summary', methods=['GET'])
