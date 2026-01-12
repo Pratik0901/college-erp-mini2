@@ -1593,20 +1593,10 @@ def student_profile(current_user, user_id):
             db.session.rollback()
             return jsonify({'error': 'Failed to update profile: ' + str(e)}), 500
 
-<<<<<<< HEAD
-@app.route('/api/student/<int:user_id>/chat', methods=['POST'])
-def student_chat(user_id):
-    """AI chatbot that analyzes student performance and provides suggestions"""
-    try:
-        data = request.get_json()
-        message = (data.get('message') or '').strip().lower()
-        
-=======
 @app.route('/api/student/<int:user_id>/detailed-performance', methods=['GET'])
 def student_detailed_performance(user_id):
     """Get comprehensive performance data with staff feedback and improvement suggestions"""
     try:
->>>>>>> 72cb4f96fc6c29a406c5fce210769ea12afde95f
         conn = get_db()
         cur = conn.cursor(dictionary=True)
         
@@ -1618,10 +1608,6 @@ def student_detailed_performance(user_id):
             return jsonify({"error": "Student not found"}), 404
         sid = s['id']
         
-<<<<<<< HEAD
-        # Get comprehensive student data
-        # Attendance data
-=======
         # Get subject-wise performance with grades and CGPA
         cur.execute("""
             SELECT c.code, c.title as subject_name, c.credits,
@@ -1638,7 +1624,6 @@ def student_detailed_performance(user_id):
         subjects = cur.fetchall()
         
         # Get overall attendance
->>>>>>> 72cb4f96fc6c29a406c5fce210769ea12afde95f
         cur.execute("""
             SELECT COUNT(*) as total, SUM(present=1) as present 
             FROM attendance WHERE student_id=%s
@@ -1648,179 +1633,6 @@ def student_detailed_performance(user_id):
         present_classes = att_data['present'] or 0
         attendance_percent = int((present_classes/total_classes)*100) if total_classes > 0 else 0
         
-<<<<<<< HEAD
-        # Grade data
-        cur.execute("""
-            SELECT AVG(marks) as avg_marks, MIN(marks) as min_marks, 
-                   MAX(marks) as max_marks, COUNT(*) as total_subjects
-            FROM grades WHERE student_id=%s
-        """, (sid,))
-        grade_data = cur.fetchone()
-        avg_marks = grade_data['avg_marks'] or 0
-        min_marks = grade_data['min_marks'] or 0
-        max_marks = grade_data['max_marks'] or 0
-        total_subjects = grade_data['total_subjects'] or 0
-        
-        # Fee data
-        cur.execute("""
-            SELECT SUM(amount) as pending FROM fees 
-            WHERE student_id=%s AND status='pending'
-        """, (sid,))
-        fee_data = cur.fetchone()
-        pending_fees = fee_data['pending'] or 0
-        
-        # Subject-wise performance
-        cur.execute("""
-            SELECT c.title, c.code, g.marks, g.grade,
-                   COUNT(a.id) as total_att, SUM(a.present=1) as present_att
-            FROM grades g
-            JOIN courses c ON g.course_id = c.id
-            LEFT JOIN attendance a ON a.course_id = c.id AND a.student_id = %s
-            WHERE g.student_id = %s
-            GROUP BY c.id, g.marks, g.grade
-            ORDER BY g.marks ASC
-        """, (sid, sid))
-        subjects = cur.fetchall()
-        
-        cur.close(); conn.close()
-        
-        # AI Response Generation based on context
-        response = generate_ai_response(
-            message, attendance_percent, avg_marks, min_marks, max_marks,
-            pending_fees, subjects, total_subjects
-        )
-        
-        return jsonify({
-            "ok": True,
-            "response": response,
-            "data": {
-                "attendance": attendance_percent,
-                "avg_marks": round(avg_marks, 2),
-                "pending_fees": float(pending_fees)
-            }
-        })
-        
-    except Exception as e:
-        logger.error(f"Student chat error: {e}")
-        return jsonify({"error": "Internal server error"}), 500
-
-def generate_ai_response(message, attendance, avg_marks, min_marks, max_marks, 
-                         pending_fees, subjects, total_subjects):
-    """Generate contextual AI responses based on student performance"""
-    
-    # Greeting responses
-    if any(word in message for word in ['hi', 'hello', 'hey', 'good morning', 'good afternoon']):
-        return f"Hello! 👋 I'm your academic assistant. I've analyzed your performance:\n\n" \
-               f"📊 Current Status:\n" \
-               f"• Attendance: {attendance}%\n" \
-               f"• Average Marks: {avg_marks:.1f}%\n" \
-               f"• Subjects: {total_subjects}\n\n" \
-               f"How can I help you today? Ask me about your performance, study tips, or attendance!"
-    
-    # Attendance queries
-    if any(word in message for word in ['attendance', 'absent', 'present', 'classes']):
-        if attendance >= 85:
-            return f"🎉 Excellent! Your attendance is {attendance}%, which is outstanding!\n\n" \
-                   f"Keep maintaining this consistency. This shows great discipline and commitment to your studies."
-        elif attendance >= 75:
-            return f"✅ Good job! Your attendance is {attendance}%, which meets the minimum requirement.\n\n" \
-                   f"💡 Suggestions:\n" \
-                   f"• Try to push it above 85% for better academic standing\n" \
-                   f"• Avoid unnecessary absences\n" \
-                   f"• Set reminders for classes"
-        else:
-            return f"⚠️ Alert! Your attendance is {attendance}%, which is below the required 75%.\n\n" \
-                   f"🚨 Urgent Actions Needed:\n" \
-                   f"• You need {75-attendance}% more attendance to meet requirements\n" \
-                   f"• Attend all upcoming classes without fail\n" \
-                   f"• Meet with your academic advisor\n" \
-                   f"• This may affect your eligibility for exams"
-    
-    # Performance/Grades queries
-    if any(word in message for word in ['performance', 'marks', 'grades', 'score', 'exam', 'test']):
-        if avg_marks >= 80:
-            weak_subjects = [s for s in subjects if s['marks'] and s['marks'] < 70]
-            if weak_subjects:
-                weak_list = '\n'.join([f"  • {s['title']}: {s['marks']}%" for s in weak_subjects[:3]])
-                return f"🌟 Great performance! Your average is {avg_marks:.1f}%\n\n" \
-                       f"Areas to improve:\n{weak_list}\n\n" \
-                       f"💡 Focus on these subjects to achieve excellence across all courses!"
-            else:
-                return f"🏆 Outstanding! Your average is {avg_marks:.1f}%\n\n" \
-                       f"You're performing excellently across all subjects. Keep up the amazing work!"
-        elif avg_marks >= 60:
-            weak_subjects = [s for s in subjects if s['marks'] and s['marks'] < 60]
-            weak_list = '\n'.join([f"  • {s['title']}: {s['marks']}%" for s in weak_subjects[:3]])
-            return f"👍 Decent performance! Your average is {avg_marks:.1f}%\n\n" \
-                   f"📚 Subjects needing attention:\n{weak_list}\n\n" \
-                   f"💡 Improvement Plan:\n" \
-                   f"• Dedicate 2 extra hours daily to weak subjects\n" \
-                   f"• Form study groups\n" \
-                   f"• Consult teachers during doubt sessions\n" \
-                   f"• Practice more problems"
-        else:
-            return f"⚠️ Your average is {avg_marks:.1f}%. Immediate action required!\n\n" \
-                   f"🎯 Recovery Strategy:\n" \
-                   f"• Create a structured study schedule\n" \
-                   f"• Attend all doubt-clearing sessions\n" \
-                   f"• Get extra tutoring for difficult subjects\n" \
-                   f"• Review class notes daily\n" \
-                   f"• Complete all assignments on time\n\n" \
-                   f"Remember: Consistent effort leads to improvement! 💪"
-    
-    # Fee queries
-    if any(word in message for word in ['fee', 'fees', 'payment', 'pay', 'money', 'due']):
-        if pending_fees > 0:
-            return f"💳 You have ₹{pending_fees:.2f} in pending fees.\n\n" \
-                   f"⏰ Please clear your dues soon to:\n" \
-                   f"• Avoid late payment penalties\n" \
-                   f"• Ensure exam hall ticket release\n" \
-                   f"• Maintain good academic standing\n\n" \
-                   f"Visit the Fee Portal to make payment online!"
-        else:
-            return f"✅ Great! You have no pending fees.\n\n" \
-                   f"Your financial obligations are up to date. Keep maintaining this!"
-    
-    # Study tips
-    if any(word in message for word in ['study', 'tips', 'improve', 'help', 'advice', 'suggestion']):
-        tips = [
-            "📝 Create a daily study schedule and stick to it",
-            "🧠 Use active recall and spaced repetition for better retention",
-            "👥 Join study groups to learn from peers",
-            "🎯 Focus on understanding concepts, not just memorizing",
-            "⏰ Take regular breaks (Pomodoro technique: 25 min study, 5 min break)",
-            "📚 Review class notes within 24 hours of the lecture",
-            "❓ Don't hesitate to ask questions during class",
-            "💪 Stay consistent - small daily efforts lead to big results"
-        ]
-        
-        return f"📖 Study Tips for Success:\n\n" + '\n'.join(tips[:5]) + \
-               f"\n\nBased on your current average of {avg_marks:.1f}%, focus especially on regular practice and concept clarity!"
-    
-    # Overall summary
-    if any(word in message for word in ['summary', 'overview', 'overall', 'report', 'status']):
-        status = "🏆 Excellent" if avg_marks >= 80 and attendance >= 85 else \
-                 "✅ Good" if avg_marks >= 60 and attendance >= 75 else \
-                 "⚠️ Needs Improvement"
-        
-        return f"📊 Your Academic Summary:\n\n" \
-               f"Overall Status: {status}\n\n" \
-               f"📈 Performance Metrics:\n" \
-               f"• Attendance: {attendance}% {'✅' if attendance >= 75 else '⚠️'}\n" \
-               f"• Average Marks: {avg_marks:.1f}% {'✅' if avg_marks >= 60 else '⚠️'}\n" \
-               f"• Pending Fees: ₹{pending_fees:.2f} {'✅' if pending_fees == 0 else '⚠️'}\n" \
-               f"• Total Subjects: {total_subjects}\n\n" \
-               f"💡 Keep up the good work and stay focused on your goals!"
-    
-    # Default response
-    return f"I'm here to help you with:\n\n" \
-           f"📊 Performance Analysis - Ask about your grades and marks\n" \
-           f"📅 Attendance Tracking - Check your attendance status\n" \
-           f"💳 Fee Information - View pending dues\n" \
-           f"📚 Study Tips - Get personalized study suggestions\n" \
-           f"📈 Overall Summary - Get a complete academic overview\n\n" \
-           f"Try asking: 'How is my performance?' or 'Show my attendance' or 'Give me study tips'"
-=======
         # Calculate CGPA (cumulative across all semesters)
         cur.execute("""
             SELECT AVG(grade_point) as cgpa
@@ -2073,4 +1885,3 @@ if __name__ == "__main__":
     except Exception as e:
         logger.error(f"Failed to start server: {e}")
         print(f"ERROR: {e}")
->>>>>>> 72cb4f96fc6c29a406c5fce210769ea12afde95f
