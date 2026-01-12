@@ -1443,5 +1443,295 @@ def student_profile(current_user, user_id):
             db.session.rollback()
             return jsonify({'error': 'Failed to update profile: ' + str(e)}), 500
 
+@app.route('/api/student/<int:user_id>/detailed-performance', methods=['GET'])
+def student_detailed_performance(user_id):
+    """Get comprehensive performance data with staff feedback and improvement suggestions"""
+    try:
+        conn = get_db()
+        cur = conn.cursor(dictionary=True)
+        
+        # Get student ID
+        cur.execute("SELECT id FROM students WHERE user_id=%s", (user_id,))
+        s = cur.fetchone()
+        if not s:
+            cur.close(); conn.close()
+            return jsonify({"error": "Student not found"}), 404
+        sid = s['id']
+        
+        # Get subject-wise performance with grades and CGPA
+        cur.execute("""
+            SELECT c.code, c.title as subject_name, c.credits,
+                   g.marks, g.grade, g.grade_point, g.semester,
+                   COUNT(DISTINCT a.date) as total_classes,
+                   SUM(CASE WHEN a.present = 1 THEN 1 ELSE 0 END) as classes_attended
+            FROM courses c
+            LEFT JOIN grades g ON c.id = g.course_id AND g.student_id = %s
+            LEFT JOIN attendance a ON c.id = a.course_id AND a.student_id = %s
+            GROUP BY c.id, g.marks, g.grade, g.grade_point, g.semester
+            HAVING g.marks IS NOT NULL
+            ORDER BY c.code
+        """, (sid, sid))
+        subjects = cur.fetchall()
+        
+        # Get overall attendance
+        cur.execute("""
+            SELECT COUNT(*) as total, SUM(present=1) as present 
+            FROM attendance WHERE student_id=%s
+        """, (sid,))
+        att_data = cur.fetchone()
+        total_classes = att_data['total'] or 0
+        present_classes = att_data['present'] or 0
+        attendance_percent = int((present_classes/total_classes)*100) if total_classes > 0 else 0
+        
+        # Calculate CGPA (cumulative across all semesters)
+        cur.execute("""
+            SELECT AVG(grade_point) as cgpa
+            FROM grades WHERE student_id=%s
+        """, (sid,))
+        cgpa_data = cur.fetchone()
+        overall_cgpa = cgpa_data['cgpa'] or 0
+        
+        # Calculate overall statistics
+        cur.execute("""
+            SELECT AVG(marks) as avg_marks, 
+                   MIN(marks) as min_marks, 
+                   MAX(marks) as max_marks,
+                   COUNT(*) as subject_count
+            FROM grades WHERE student_id=%s
+        """, (sid,))
+        stats = cur.fetchone()
+        
+        cur.close(); conn.close()
+        
+        # Process subjects data
+        subjects_data = []
+        weak_subjects = []
+        strong_subjects = []
+        
+        for subj in subjects:
+            total = subj['total_classes'] or 0
+            attended = subj['classes_attended'] or 0
+            att_percent = int((attended/total)*100) if total > 0 else 0
+            
+            marks = subj['marks'] or 0
+            status = 'excellent' if marks >= 80 else 'good' if marks >= 60 else 'average' if marks >= 45 else 'poor'
+            
+            # Track weak and strong subjects
+            if marks < 60:
+                weak_subjects.append({'name': subj['subject_name'], 'marks': marks, 'attendance': att_percent})
+            elif marks >= 80:
+                strong_subjects.append({'name': subj['subject_name'], 'marks': marks})
+            
+            feedback = generate_subject_feedback(marks, att_percent, subj['grade'])
+            
+            subjects_data.append({
+                'code': subj['code'],
+                'subject_name': subj['subject_name'],
+                'credits': subj['credits'] or 3,
+                'marks': marks,
+                'grade': subj['grade'] or 'N/A',
+                'grade_point': subj['grade_point'] or 0,
+                'cgpa': round(subj['grade_point'] or 0, 2),
+                'attendance_percent': att_percent,
+                'classes_attended': attended,
+                'total_classes': total,
+                'status': status,
+                'staff_feedback': feedback,
+                'semester': subj['semester'] or 1
+            })
+        
+        # Generate personalized improvement suggestions
+        suggestions = generate_improvement_suggestions(
+            attendance_percent, 
+            stats['avg_marks'] or 0, 
+            overall_cgpa,
+            weak_subjects,
+            strong_subjects,
+            stats['subject_count'] or 0
+        )
+        
+        return jsonify({
+            'ok': True,
+            'subjects': subjects_data,
+            'overall': {
+                'attendance_percent': attendance_percent,
+                'avg_marks': round(stats['avg_marks'] or 0, 2),
+                'cgpa': round(overall_cgpa, 2)
+            },
+            'improvement_suggestions': suggestions
+        })
+        
+    except Exception as e:
+        logger.error(f"Detailed performance error: {e}", exc_info=True)
+        return jsonify({"error": "Internal server error"}), 500
+
+def generate_improvement_suggestions(attendance, avg_marks, cgpa, weak_subjects, strong_subjects, total_subjects):
+    """Generate personalized improvement suggestions based on performance"""
+    suggestions = {
+        'priority': 'high',  # high, medium, low
+        'main_message': '',
+        'action_items': [],
+        'strengths': [],
+        'areas_of_concern': []
+    }
+    
+    # Determine priority level
+    critical_issues = 0
+    if attendance < 75:
+        critical_issues += 1
+    if avg_marks < 50:
+        critical_issues += 1
+    if cgpa < 5.0:
+        critical_issues += 1
+    
+    if critical_issues >= 2:
+        suggestions['priority'] = 'high'
+        suggestions['main_message'] = '🚨 Urgent Action Required: Your performance needs immediate attention!'
+    elif critical_issues == 1:
+        suggestions['priority'] = 'medium'
+        suggestions['main_message'] = '⚠️ Attention Needed: Focus on improving key areas of your performance.'
+    else:
+        suggestions['priority'] = 'low'
+        suggestions['main_message'] = '✅ Good Progress: Keep up the momentum and aim for excellence!'
+    
+    # Attendance-based suggestions
+    if attendance < 75:
+        suggestions['areas_of_concern'].append({
+            'issue': 'Low Attendance',
+            'detail': f'Your attendance is {attendance}%, below the required 75%',
+            'impact': 'May affect exam eligibility and overall understanding'
+        })
+        suggestions['action_items'].extend([
+            '📅 Attend all remaining classes without fail',
+            '⏰ Set daily reminders for class timings',
+            '🤝 Form study groups to stay motivated',
+            '💬 Speak with academic advisor about catching up'
+        ])
+    elif attendance < 85:
+        suggestions['action_items'].append('📅 Aim to increase attendance above 85% for better learning')
+    else:
+        suggestions['strengths'].append(f'✨ Excellent attendance of {attendance}%')
+    
+    # Academic performance suggestions
+    if avg_marks < 50:
+        suggestions['areas_of_concern'].append({
+            'issue': 'Below Average Performance',
+            'detail': f'Average marks of {avg_marks:.1f}% need significant improvement',
+            'impact': 'Risk of failing courses and low CGPA'
+        })
+        suggestions['action_items'].extend([
+            '📚 Dedicate minimum 3-4 hours daily for studies',
+            '👨‍🏫 Attend all doubt-clearing sessions',
+            '📝 Complete assignments on time',
+            '🎯 Focus on understanding concepts rather than memorizing'
+        ])
+    elif avg_marks < 60:
+        suggestions['action_items'].extend([
+            '📖 Increase study hours to at least 2-3 hours daily',
+            '✍️ Practice more problems and previous year papers'
+        ])
+    elif avg_marks >= 80:
+        suggestions['strengths'].append(f'🌟 Outstanding average marks of {avg_marks:.1f}%')
+    
+    # CGPA-based suggestions
+    if cgpa < 5.0:
+        suggestions['areas_of_concern'].append({
+            'issue': 'Low CGPA',
+            'detail': f'CGPA of {cgpa:.2f} is below satisfactory level',
+            'impact': 'May affect future opportunities and placements'
+        })
+        suggestions['action_items'].append('🎯 Target minimum 7.0 CGPA through consistent effort')
+    elif cgpa >= 8.0:
+        suggestions['strengths'].append(f'🏆 Impressive CGPA of {cgpa:.2f}')
+    
+    # Subject-specific suggestions
+    if weak_subjects:
+        weak_list = ', '.join([f"{s['name']} ({s['marks']}%)" for s in weak_subjects[:3]])
+        suggestions['areas_of_concern'].append({
+            'issue': 'Weak Subjects Identified',
+            'detail': f'{len(weak_subjects)} subject(s) need attention: {weak_list}',
+            'impact': 'Dragging down overall performance'
+        })
+        suggestions['action_items'].extend([
+            f'🎓 Focus extra 1-2 hours daily on: {", ".join([s["name"] for s in weak_subjects[:2]])}',
+            '👥 Join subject-specific study groups or get tutoring',
+            '📊 Analyze past mistakes and work on weak topics'
+        ])
+    
+    if strong_subjects:
+        strong_list = ', '.join([s['name'] for s in strong_subjects[:2]])
+        suggestions['strengths'].append(f'💪 Strong performance in: {strong_list}')
+    
+    # General recommendations based on overall status
+    if suggestions['priority'] == 'high':
+        suggestions['action_items'].extend([
+            '🚨 Meet with faculty advisor this week',
+            '📋 Create a structured daily study timetable',
+            '❌ Eliminate distractions during study hours'
+        ])
+    elif suggestions['priority'] == 'medium':
+        suggestions['action_items'].extend([
+            '📈 Review and revise notes after each class',
+            '⚡ Participate actively in class discussions'
+        ])
+    else:
+        suggestions['action_items'].extend([
+            '🎯 Set higher goals and challenge yourself',
+            '🤝 Help peers who are struggling',
+            '🏅 Participate in co-curricular activities'
+        ])
+    
+    # Add motivational message
+    if suggestions['priority'] == 'high':
+        suggestions['motivation'] = '💪 Remember: Every expert was once a beginner. Start today, improve gradually!'
+    elif suggestions['priority'] == 'medium':
+        suggestions['motivation'] = '🌱 You\'re on the right path. Stay consistent and you\'ll see great results!'
+    else:
+        suggestions['motivation'] = '🌟 Excellent work! Maintain this momentum and reach new heights!'
+    
+    return suggestions
+
+def generate_subject_feedback(marks, attendance, grade):
+    """Generate realistic staff feedback based on performance"""
+    if marks >= 85 and attendance >= 85:
+        feedbacks = [
+            "Excellent work! Shows consistent dedication and understanding of the subject. Keep it up!",
+            "Outstanding performance! Very active in class and demonstrates strong grasp of concepts.",
+            "Exceptional student! Regularly participates and produces high-quality work.",
+            "Remarkable progress! Always prepared and engaged during lectures."
+        ]
+    elif marks >= 70 and attendance >= 75:
+        feedbacks = [
+            "Good performance overall. Continue your steady effort and aim for excellence.",
+            "Solid understanding of the subject. Focus on weak areas to improve further.",
+            "Regular attendance and decent marks. Keep working consistently.",
+            "Good work! With more practice, you can achieve even better results."
+        ]
+    elif marks >= 50 and attendance >= 65:
+        feedbacks = [
+            "Average performance. Need to focus more on understanding core concepts.",
+            "Satisfactory work but can do much better. Attend all classes and study regularly.",
+            "Room for improvement. Please seek help during doubt sessions.",
+            "Needs more effort. Regular study and attendance will help improve performance."
+        ]
+    else:
+        feedbacks = [
+            "Performance needs significant improvement. Please meet me during office hours.",
+            "Struggling with the subject. Strongly recommend extra tutoring and better attendance.",
+            "Below expectations. Immediate action required to avoid failing the course.",
+            "Critical situation. Must improve attendance and dedicate more study time."
+        ]
+    
+    import random
+    return random.choice(feedbacks)
+
 if __name__ == "__main__":
-    app.run(debug=True, port=5000, host="0.0.0.0")
+    try:
+        print("=" * 50)
+        print("Starting College ERP Backend Server")
+        print("URL: http://localhost:5000")
+        print("=" * 50)
+        app.run(debug=True, host="0.0.0.0", port=5000, use_reloader=True)
+    except Exception as e:
+        logger.error(f"Failed to start server: {e}")
+        print(f"ERROR: {e}")
